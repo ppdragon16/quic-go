@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/utils"
+	"github.com/daeuniverse/quic-go/internal/protocol"
+	"github.com/daeuniverse/quic-go/internal/utils"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"

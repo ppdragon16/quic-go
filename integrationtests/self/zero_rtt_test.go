@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/quic-go/quic-go"
-	quicproxy "github.com/quic-go/quic-go/integrationtests/tools/proxy"
-	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/wire"
-	"github.com/quic-go/quic-go/logging"
+	"github.com/daeuniverse/quic-go"
+	quicproxy "github.com/daeuniverse/quic-go/integrationtests/tools/proxy"
+	"github.com/daeuniverse/quic-go/internal/protocol"
+	"github.com/daeuniverse/quic-go/internal/wire"
+	"github.com/daeuniverse/quic-go/logging"
 
 	"github.com/stretchr/testify/require"
 )

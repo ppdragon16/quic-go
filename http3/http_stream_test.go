@@ -8,9 +8,9 @@ import (
 	"net/http"
 	"net/http/httptrace"
 
-	mockquic "github.com/quic-go/quic-go/internal/mocks/quic"
-	"github.com/quic-go/quic-go/internal/protocol"
-	"github.com/quic-go/quic-go/internal/qerr"
+	mockquic "github.com/daeuniverse/quic-go/internal/mocks/quic"
+	"github.com/daeuniverse/quic-go/internal/protocol"
+	"github.com/daeuniverse/quic-go/internal/qerr"
 
 	"github.com/quic-go/qpack"
 
