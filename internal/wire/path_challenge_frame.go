@@ -11,13 +11,12 @@ type PathChallengeFrame struct {
 	Data [8]byte
 }
 
-func parsePathChallengeFrame(b []byte, _ protocol.Version) (*PathChallengeFrame, int, error) {
-	f := &PathChallengeFrame{}
+func parsePathChallengeFrame(frame *PathChallengeFrame, b []byte, _ protocol.Version) (int, error) {
 	if len(b) < 8 {
-		return nil, 0, io.EOF
+		return 0, io.EOF
 	}
-	copy(f.Data[:], b)
-	return f, 8, nil
+	copy(frame.Data[:], b)
+	return 8, nil
 }
 
 func (f *PathChallengeFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

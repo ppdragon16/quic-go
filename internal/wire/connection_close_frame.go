@@ -15,38 +15,38 @@ type ConnectionCloseFrame struct {
 	ReasonPhrase       string
 }
 
-func parseConnectionCloseFrame(b []byte, typ uint64, _ protocol.Version) (*ConnectionCloseFrame, int, error) {
+func parseConnectionCloseFrame(frame *ConnectionCloseFrame, b []byte, typ uint64, _ protocol.Version) (int, error) {
 	startLen := len(b)
-	f := &ConnectionCloseFrame{IsApplicationError: typ == applicationCloseFrameType}
+	frame.IsApplicationError = typ == applicationCloseFrameType
 	ec, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
-	f.ErrorCode = ec
+	frame.ErrorCode = ec
 	// read the Frame Type, if this is not an application error
-	if !f.IsApplicationError {
+	if !frame.IsApplicationError {
 		ft, l, err := quicvarint.Parse(b)
 		if err != nil {
-			return nil, 0, replaceUnexpectedEOF(err)
+			return 0, replaceUnexpectedEOF(err)
 		}
 		b = b[l:]
-		f.FrameType = ft
+		frame.FrameType = ft
 	}
 	var reasonPhraseLen uint64
 	reasonPhraseLen, l, err = quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
 	if int(reasonPhraseLen) > len(b) {
-		return nil, 0, io.EOF
+		return 0, io.EOF
 	}
 
 	reasonPhrase := make([]byte, reasonPhraseLen)
 	copy(reasonPhrase, b)
-	f.ReasonPhrase = string(reasonPhrase)
-	return f, startLen - len(b) + int(reasonPhraseLen), nil
+	frame.ReasonPhrase = string(reasonPhrase)
+	return startLen - len(b) + int(reasonPhraseLen), nil
 }
 
 // Length of a written frame

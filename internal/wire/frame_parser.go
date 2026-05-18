@@ -44,6 +44,24 @@ type FrameParser struct {
 	// To avoid allocating when parsing, keep a single ACK frame struct.
 	// It is used over and over again.
 	ackFrame *AckFrame
+
+	// Reusable frame structs to avoid per-packet allocations.
+	pingFrame               PingFrame
+	handshakeDoneFrame      HandshakeDoneFrame
+	maxDataFrame            MaxDataFrame
+	maxStreamDataFrame      MaxStreamDataFrame
+	maxStreamsFrame         MaxStreamsFrame
+	dataBlockedFrame        DataBlockedFrame
+	streamDataBlockedFrame  StreamDataBlockedFrame
+	streamsBlockedFrame     StreamsBlockedFrame
+	resetStreamFrame        ResetStreamFrame
+	stopSendingFrame        StopSendingFrame
+	retireConnectionIDFrame RetireConnectionIDFrame
+	pathChallengeFrame      PathChallengeFrame
+	pathResponseFrame       PathResponseFrame
+	cryptoFrame             CryptoFrame
+	datagramFrame           DatagramFrame
+	connectionCloseFrame    ConnectionCloseFrame
 }
 
 // NewFrameParser creates a new frame parser.
@@ -100,7 +118,7 @@ func (p *FrameParser) parseFrame(b []byte, typ uint64, encLevel protocol.Encrypt
 	} else {
 		switch typ {
 		case pingFrameType:
-			frame = &PingFrame{}
+			frame = &p.pingFrame
 		case ackFrameType, ackECNFrameType:
 			ackDelayExponent := p.ackDelayExponent
 			if encLevel != protocol.Encryption1RTT {
@@ -110,40 +128,54 @@ func (p *FrameParser) parseFrame(b []byte, typ uint64, encLevel protocol.Encrypt
 			l, err = parseAckFrame(p.ackFrame, b, typ, ackDelayExponent, v)
 			frame = p.ackFrame
 		case resetStreamFrameType:
-			frame, l, err = parseResetStreamFrame(b, v)
+			l, err = parseResetStreamFrame(&p.resetStreamFrame, b, v)
+			frame = &p.resetStreamFrame
 		case stopSendingFrameType:
-			frame, l, err = parseStopSendingFrame(b, v)
+			l, err = parseStopSendingFrame(&p.stopSendingFrame, b, v)
+			frame = &p.stopSendingFrame
 		case cryptoFrameType:
-			frame, l, err = parseCryptoFrame(b, v)
+			l, err = parseCryptoFrame(&p.cryptoFrame, b, v)
+				frame = &p.cryptoFrame
 		case newTokenFrameType:
 			frame, l, err = parseNewTokenFrame(b, v)
 		case maxDataFrameType:
-			frame, l, err = parseMaxDataFrame(b, v)
+			l, err = parseMaxDataFrame(&p.maxDataFrame, b, v)
+			frame = &p.maxDataFrame
 		case maxStreamDataFrameType:
-			frame, l, err = parseMaxStreamDataFrame(b, v)
+			l, err = parseMaxStreamDataFrame(&p.maxStreamDataFrame, b, v)
+			frame = &p.maxStreamDataFrame
 		case bidiMaxStreamsFrameType, uniMaxStreamsFrameType:
-			frame, l, err = parseMaxStreamsFrame(b, typ, v)
+			l, err = parseMaxStreamsFrame(&p.maxStreamsFrame, b, typ, v)
+			frame = &p.maxStreamsFrame
 		case dataBlockedFrameType:
-			frame, l, err = parseDataBlockedFrame(b, v)
+			l, err = parseDataBlockedFrame(&p.dataBlockedFrame, b, v)
+			frame = &p.dataBlockedFrame
 		case streamDataBlockedFrameType:
-			frame, l, err = parseStreamDataBlockedFrame(b, v)
+			l, err = parseStreamDataBlockedFrame(&p.streamDataBlockedFrame, b, v)
+			frame = &p.streamDataBlockedFrame
 		case bidiStreamBlockedFrameType, uniStreamBlockedFrameType:
-			frame, l, err = parseStreamsBlockedFrame(b, typ, v)
+			l, err = parseStreamsBlockedFrame(&p.streamsBlockedFrame, b, typ, v)
+			frame = &p.streamsBlockedFrame
 		case newConnectionIDFrameType:
 			frame, l, err = parseNewConnectionIDFrame(b, v)
 		case retireConnectionIDFrameType:
-			frame, l, err = parseRetireConnectionIDFrame(b, v)
+			l, err = parseRetireConnectionIDFrame(&p.retireConnectionIDFrame, b, v)
+			frame = &p.retireConnectionIDFrame
 		case pathChallengeFrameType:
-			frame, l, err = parsePathChallengeFrame(b, v)
+			l, err = parsePathChallengeFrame(&p.pathChallengeFrame, b, v)
+			frame = &p.pathChallengeFrame
 		case pathResponseFrameType:
-			frame, l, err = parsePathResponseFrame(b, v)
+			l, err = parsePathResponseFrame(&p.pathResponseFrame, b, v)
+			frame = &p.pathResponseFrame
 		case connectionCloseFrameType, applicationCloseFrameType:
-			frame, l, err = parseConnectionCloseFrame(b, typ, v)
+			l, err = parseConnectionCloseFrame(&p.connectionCloseFrame, b, typ, v)
+				frame = &p.connectionCloseFrame
 		case handshakeDoneFrameType:
-			frame = &HandshakeDoneFrame{}
+			frame = &p.handshakeDoneFrame
 		case 0x30, 0x31:
 			if p.supportsDatagrams {
-				frame, l, err = parseDatagramFrame(b, typ, v)
+				l, err = parseDatagramFrame(&p.datagramFrame, b, typ, v)
+					frame = &p.datagramFrame
 				break
 			}
 			fallthrough

@@ -13,7 +13,8 @@ import (
 
 func TestParseStreamsBlockedFrameBidirectional(t *testing.T) {
 	data := encodeVarInt(0x1337)
-	f, l, err := parseStreamsBlockedFrame(data, bidiStreamBlockedFrameType, protocol.Version1)
+	var f StreamsBlockedFrame
+	l, err := parseStreamsBlockedFrame(&f, data, bidiStreamBlockedFrameType, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, protocol.StreamTypeBidi, f.Type)
 	require.EqualValues(t, 0x1337, f.StreamLimit)
@@ -22,7 +23,8 @@ func TestParseStreamsBlockedFrameBidirectional(t *testing.T) {
 
 func TestParseStreamsBlockedFrameUnidirectional(t *testing.T) {
 	data := encodeVarInt(0x7331)
-	f, l, err := parseStreamsBlockedFrame(data, uniStreamBlockedFrameType, protocol.Version1)
+	var f StreamsBlockedFrame
+	l, err := parseStreamsBlockedFrame(&f, data, uniStreamBlockedFrameType, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, protocol.StreamTypeUni, f.Type)
 	require.EqualValues(t, 0x7331, f.StreamLimit)
@@ -31,11 +33,12 @@ func TestParseStreamsBlockedFrameUnidirectional(t *testing.T) {
 
 func TestParseStreamsBlockedFrameErrorsOnEOFs(t *testing.T) {
 	data := encodeVarInt(0x12345678)
-	_, l, err := parseStreamsBlockedFrame(data, bidiStreamBlockedFrameType, protocol.Version1)
+	var f StreamsBlockedFrame
+	l, err := parseStreamsBlockedFrame(&f, data, bidiStreamBlockedFrameType, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, _, err := parseStreamsBlockedFrame(data[:i], bidiStreamBlockedFrameType, protocol.Version1)
+		_, err := parseStreamsBlockedFrame(&f, data[:i], bidiStreamBlockedFrameType, protocol.Version1)
 		require.Equal(t, io.EOF, err)
 	}
 }
@@ -58,9 +61,10 @@ func TestParseStreamsBlockedFrameMaxStreamCount(t *testing.T) {
 			typ, l, err := quicvarint.Parse(b)
 			require.NoError(t, err)
 			b = b[l:]
-			frame, l, err := parseStreamsBlockedFrame(b, typ, protocol.Version1)
+			var parsed StreamsBlockedFrame
+			l, err = parseStreamsBlockedFrame(&parsed, b, typ, protocol.Version1)
 			require.NoError(t, err)
-			require.Equal(t, f, frame)
+			require.Equal(t, f, &parsed)
 			require.Equal(t, len(b), l)
 		})
 	}
@@ -84,7 +88,8 @@ func TestParseStreamsBlockedFrameErrorOnTooLargeStreamCount(t *testing.T) {
 			typ, l, err := quicvarint.Parse(b)
 			require.NoError(t, err)
 			b = b[l:]
-			_, _, err = parseStreamsBlockedFrame(b, typ, protocol.Version1)
+			var parsed StreamsBlockedFrame
+			_, err = parseStreamsBlockedFrame(&parsed, b, typ, protocol.Version1)
 			require.EqualError(t, err, fmt.Sprintf("%d exceeds the maximum stream count", protocol.MaxStreamCount+1))
 		})
 	}

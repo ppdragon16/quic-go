@@ -11,7 +11,8 @@ import (
 
 func TestParseRetireConnectionID(t *testing.T) {
 	data := encodeVarInt(0xdeadbeef) // sequence number
-	frame, l, err := parseRetireConnectionIDFrame(data, protocol.Version1)
+	var frame RetireConnectionIDFrame
+	l, err := parseRetireConnectionIDFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0xdeadbeef), frame.SequenceNumber)
 	require.Equal(t, len(data), l)
@@ -19,11 +20,12 @@ func TestParseRetireConnectionID(t *testing.T) {
 
 func TestParseRetireConnectionIDErrorsOnEOFs(t *testing.T) {
 	data := encodeVarInt(0xdeadbeef) // sequence number
-	_, l, err := parseRetireConnectionIDFrame(data, protocol.Version1)
+	var frame RetireConnectionIDFrame
+	l, err := parseRetireConnectionIDFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, _, err := parseRetireConnectionIDFrame(data[:i], protocol.Version1)
+		_, err := parseRetireConnectionIDFrame(&frame, data[:i], protocol.Version1)
 		require.Equal(t, io.EOF, err)
 	}
 }

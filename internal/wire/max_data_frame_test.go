@@ -11,7 +11,8 @@ import (
 
 func TestParseMaxDataFrame(t *testing.T) {
 	data := encodeVarInt(0xdecafbad123456) // byte offset
-	frame, l, err := parseMaxDataFrame(data, protocol.Version1)
+	var frame MaxDataFrame
+	l, err := parseMaxDataFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, protocol.ByteCount(0xdecafbad123456), frame.MaximumData)
 	require.Equal(t, len(data), l)
@@ -19,11 +20,12 @@ func TestParseMaxDataFrame(t *testing.T) {
 
 func TestParseMaxDataErrorsOnEOFs(t *testing.T) {
 	data := encodeVarInt(0xdecafbad1234567) // byte offset
-	_, l, err := parseMaxDataFrame(data, protocol.Version1)
+	var frame MaxDataFrame
+	l, err := parseMaxDataFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, _, err := parseMaxDataFrame(data[:i], protocol.Version1)
+		_, err := parseMaxDataFrame(&frame, data[:i], protocol.Version1)
 		require.Equal(t, io.EOF, err)
 	}
 }

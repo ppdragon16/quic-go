@@ -19,29 +19,28 @@ type DatagramFrame struct {
 	Data           []byte
 }
 
-func parseDatagramFrame(b []byte, typ uint64, _ protocol.Version) (*DatagramFrame, int, error) {
+func parseDatagramFrame(frame *DatagramFrame, b []byte, typ uint64, _ protocol.Version) (int, error) {
 	startLen := len(b)
-	f := &DatagramFrame{}
-	f.DataLenPresent = typ&0x1 > 0
+	frame.DataLenPresent = typ&0x1 > 0
 
 	var length uint64
-	if f.DataLenPresent {
+	if frame.DataLenPresent {
 		var err error
 		var l int
 		length, l, err = quicvarint.Parse(b)
 		if err != nil {
-			return nil, 0, replaceUnexpectedEOF(err)
+			return 0, replaceUnexpectedEOF(err)
 		}
 		b = b[l:]
 		if length > uint64(len(b)) {
-			return nil, 0, io.EOF
+			return 0, io.EOF
 		}
 	} else {
 		length = uint64(len(b))
 	}
-	f.Data = make([]byte, length)
-	copy(f.Data, b)
-	return f, startLen - len(b) + int(length), nil
+	frame.Data = make([]byte, length)
+	copy(frame.Data, b)
+	return startLen - len(b) + int(length), nil
 }
 
 func (f *DatagramFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

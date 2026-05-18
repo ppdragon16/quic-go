@@ -11,14 +11,13 @@ type MaxDataFrame struct {
 }
 
 // parseMaxDataFrame parses a MAX_DATA frame
-func parseMaxDataFrame(b []byte, _ protocol.Version) (*MaxDataFrame, int, error) {
-	frame := &MaxDataFrame{}
+func parseMaxDataFrame(frame *MaxDataFrame, b []byte, _ protocol.Version) (int, error) {
 	byteOffset, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	frame.MaximumData = protocol.ByteCount(byteOffset)
-	return frame, l, nil
+	return l, nil
 }
 
 func (f *MaxDataFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

@@ -13,23 +13,22 @@ type MaxStreamsFrame struct {
 	MaxStreamNum protocol.StreamNum
 }
 
-func parseMaxStreamsFrame(b []byte, typ uint64, _ protocol.Version) (*MaxStreamsFrame, int, error) {
-	f := &MaxStreamsFrame{}
+func parseMaxStreamsFrame(frame *MaxStreamsFrame, b []byte, typ uint64, _ protocol.Version) (int, error) {
 	switch typ {
 	case bidiMaxStreamsFrameType:
-		f.Type = protocol.StreamTypeBidi
+		frame.Type = protocol.StreamTypeBidi
 	case uniMaxStreamsFrameType:
-		f.Type = protocol.StreamTypeUni
+		frame.Type = protocol.StreamTypeUni
 	}
 	streamID, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
-	f.MaxStreamNum = protocol.StreamNum(streamID)
-	if f.MaxStreamNum > protocol.MaxStreamCount {
-		return nil, 0, fmt.Errorf("%d exceeds the maximum stream count", f.MaxStreamNum)
+	frame.MaxStreamNum = protocol.StreamNum(streamID)
+	if frame.MaxStreamNum > protocol.MaxStreamCount {
+		return 0, fmt.Errorf("%d exceeds the maximum stream count", frame.MaxStreamNum)
 	}
-	return f, l, nil
+	return l, nil
 }
 
 func (f *MaxStreamsFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

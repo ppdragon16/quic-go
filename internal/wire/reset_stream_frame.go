@@ -13,32 +13,26 @@ type ResetStreamFrame struct {
 	FinalSize protocol.ByteCount
 }
 
-func parseResetStreamFrame(b []byte, _ protocol.Version) (*ResetStreamFrame, int, error) {
+func parseResetStreamFrame(frame *ResetStreamFrame, b []byte, _ protocol.Version) (int, error) {
 	startLen := len(b)
-	var streamID protocol.StreamID
-	var byteOffset protocol.ByteCount
 	sid, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
-	streamID = protocol.StreamID(sid)
+	frame.StreamID = protocol.StreamID(sid)
 	errorCode, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
+	frame.ErrorCode = qerr.StreamErrorCode(errorCode)
 	bo, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
-	byteOffset = protocol.ByteCount(bo)
-
-	return &ResetStreamFrame{
-		StreamID:  streamID,
-		ErrorCode: qerr.StreamErrorCode(errorCode),
-		FinalSize: byteOffset,
-	}, startLen - len(b) + l, nil
+	frame.FinalSize = protocol.ByteCount(bo)
+	return startLen - len(b) + l, nil
 }
 
 func (f *ResetStreamFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

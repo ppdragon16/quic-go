@@ -13,7 +13,8 @@ import (
 func TestParseStopSending(t *testing.T) {
 	data := encodeVarInt(0xdecafbad)             // stream ID
 	data = append(data, encodeVarInt(0x1337)...) // error code
-	frame, l, err := parseStopSendingFrame(data, protocol.Version1)
+	var frame StopSendingFrame
+	l, err := parseStopSendingFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, protocol.StreamID(0xdecafbad), frame.StreamID)
 	require.Equal(t, qerr.StreamErrorCode(0x1337), frame.ErrorCode)
@@ -23,11 +24,12 @@ func TestParseStopSending(t *testing.T) {
 func TestParseStopSendingErrorsOnEOFs(t *testing.T) {
 	data := encodeVarInt(0xdecafbad)               // stream ID
 	data = append(data, encodeVarInt(0x123456)...) // error code
-	_, l, err := parseStopSendingFrame(data, protocol.Version1)
+	var frame StopSendingFrame
+	l, err := parseStopSendingFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, _, err := parseStopSendingFrame(data[:i], protocol.Version1)
+		_, err := parseStopSendingFrame(&frame, data[:i], protocol.Version1)
 		require.Equal(t, io.EOF, err)
 	}
 }

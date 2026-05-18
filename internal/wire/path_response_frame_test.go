@@ -11,7 +11,8 @@ import (
 
 func TestParsePathResponse(t *testing.T) {
 	b := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	f, l, err := parsePathResponseFrame(b, protocol.Version1)
+	var f PathResponseFrame
+	l, err := parsePathResponseFrame(&f, b, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, [8]byte{1, 2, 3, 4, 5, 6, 7, 8}, f.Data)
 	require.Equal(t, len(b), l)
@@ -19,11 +20,12 @@ func TestParsePathResponse(t *testing.T) {
 
 func TestParsePathResponseErrorsOnEOFs(t *testing.T) {
 	data := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	_, l, err := parsePathResponseFrame(data, protocol.Version1)
+	var f PathResponseFrame
+	l, err := parsePathResponseFrame(&f, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, _, err := parsePathResponseFrame(data[:i], protocol.Version1)
+		_, err := parsePathResponseFrame(&f, data[:i], protocol.Version1)
 		require.Equal(t, io.EOF, err)
 	}
 }

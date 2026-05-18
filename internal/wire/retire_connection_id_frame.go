@@ -10,12 +10,13 @@ type RetireConnectionIDFrame struct {
 	SequenceNumber uint64
 }
 
-func parseRetireConnectionIDFrame(b []byte, _ protocol.Version) (*RetireConnectionIDFrame, int, error) {
+func parseRetireConnectionIDFrame(frame *RetireConnectionIDFrame, b []byte, _ protocol.Version) (int, error) {
 	seq, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
-	return &RetireConnectionIDFrame{SequenceNumber: seq}, l, nil
+	frame.SequenceNumber = seq
+	return l, nil
 }
 
 func (f *RetireConnectionIDFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

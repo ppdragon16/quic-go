@@ -11,13 +11,12 @@ type PathResponseFrame struct {
 	Data [8]byte
 }
 
-func parsePathResponseFrame(b []byte, _ protocol.Version) (*PathResponseFrame, int, error) {
-	f := &PathResponseFrame{}
+func parsePathResponseFrame(frame *PathResponseFrame, b []byte, _ protocol.Version) (int, error) {
 	if len(b) < 8 {
-		return nil, 0, io.EOF
+		return 0, io.EOF
 	}
-	copy(f.Data[:], b)
-	return f, 8, nil
+	copy(frame.Data[:], b)
+	return 8, nil
 }
 
 func (f *PathResponseFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

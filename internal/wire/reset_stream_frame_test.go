@@ -13,7 +13,8 @@ func TestParseResetStream(t *testing.T) {
 	data := encodeVarInt(0xdeadbeef)                  // stream ID
 	data = append(data, encodeVarInt(0x1337)...)      // error code
 	data = append(data, encodeVarInt(0x987654321)...) // byte offset
-	frame, l, err := parseResetStreamFrame(data, protocol.Version1)
+	var frame ResetStreamFrame
+	l, err := parseResetStreamFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, protocol.StreamID(0xdeadbeef), frame.StreamID)
 	require.Equal(t, protocol.ByteCount(0x987654321), frame.FinalSize)
@@ -25,11 +26,12 @@ func TestParseResetStreamErrorsOnEOFs(t *testing.T) {
 	data := encodeVarInt(0xdeadbeef)                  // stream ID
 	data = append(data, encodeVarInt(0x1337)...)      // error code
 	data = append(data, encodeVarInt(0x987654321)...) // byte offset
-	_, l, err := parseResetStreamFrame(data, protocol.Version1)
+	var frame ResetStreamFrame
+	l, err := parseResetStreamFrame(&frame, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, _, err := parseResetStreamFrame(data[:i], protocol.Version1)
+		_, err := parseResetStreamFrame(&frame, data[:i], protocol.Version1)
 		require.Error(t, err)
 	}
 }

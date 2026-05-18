@@ -13,23 +13,22 @@ type StopSendingFrame struct {
 }
 
 // parseStopSendingFrame parses a STOP_SENDING frame
-func parseStopSendingFrame(b []byte, _ protocol.Version) (*StopSendingFrame, int, error) {
+func parseStopSendingFrame(frame *StopSendingFrame, b []byte, _ protocol.Version) (int, error) {
 	startLen := len(b)
 	streamID, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
 	errorCode, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
 
-	return &StopSendingFrame{
-		StreamID:  protocol.StreamID(streamID),
-		ErrorCode: qerr.StreamErrorCode(errorCode),
-	}, startLen - len(b), nil
+	frame.StreamID = protocol.StreamID(streamID)
+	frame.ErrorCode = qerr.StreamErrorCode(errorCode)
+	return startLen - len(b), nil
 }
 
 // Length of a written frame

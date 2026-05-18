@@ -11,7 +11,8 @@ import (
 
 func TestParsePathChallenge(t *testing.T) {
 	b := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	f, l, err := parsePathChallengeFrame(b, protocol.Version1)
+	var f PathChallengeFrame
+	l, err := parsePathChallengeFrame(&f, b, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, [8]byte{1, 2, 3, 4, 5, 6, 7, 8}, f.Data)
 	require.Equal(t, len(b), l)
@@ -19,11 +20,12 @@ func TestParsePathChallenge(t *testing.T) {
 
 func TestParsePathChallengeErrorsOnEOFs(t *testing.T) {
 	data := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	_, l, err := parsePathChallengeFrame(data, protocol.Version1)
+	var f PathChallengeFrame
+	l, err := parsePathChallengeFrame(&f, data, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, _, err := parsePathChallengeFrame(data[:i], protocol.Version1)
+		_, err := parsePathChallengeFrame(&f, data[:i], protocol.Version1)
 		require.Equal(t, io.EOF, err)
 	}
 }

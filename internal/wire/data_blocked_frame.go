@@ -10,12 +10,13 @@ type DataBlockedFrame struct {
 	MaximumData protocol.ByteCount
 }
 
-func parseDataBlockedFrame(b []byte, _ protocol.Version) (*DataBlockedFrame, int, error) {
+func parseDataBlockedFrame(frame *DataBlockedFrame, b []byte, _ protocol.Version) (int, error) {
 	offset, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
-	return &DataBlockedFrame{MaximumData: protocol.ByteCount(offset)}, l, nil
+	frame.MaximumData = protocol.ByteCount(offset)
+	return l, nil
 }
 
 func (f *DataBlockedFrame) Append(b []byte, version protocol.Version) ([]byte, error) {

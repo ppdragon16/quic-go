@@ -11,22 +11,21 @@ type StreamDataBlockedFrame struct {
 	MaximumStreamData protocol.ByteCount
 }
 
-func parseStreamDataBlockedFrame(b []byte, _ protocol.Version) (*StreamDataBlockedFrame, int, error) {
+func parseStreamDataBlockedFrame(frame *StreamDataBlockedFrame, b []byte, _ protocol.Version) (int, error) {
 	startLen := len(b)
 	sid, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
 	offset, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 
-	return &StreamDataBlockedFrame{
-		StreamID:          protocol.StreamID(sid),
-		MaximumStreamData: protocol.ByteCount(offset),
-	}, startLen - len(b) + l, nil
+	frame.StreamID = protocol.StreamID(sid)
+	frame.MaximumStreamData = protocol.ByteCount(offset)
+	return startLen - len(b) + l, nil
 }
 
 func (f *StreamDataBlockedFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

@@ -13,28 +13,29 @@ type CryptoFrame struct {
 	Data   []byte
 }
 
-func parseCryptoFrame(b []byte, _ protocol.Version) (*CryptoFrame, int, error) {
+func parseCryptoFrame(frame *CryptoFrame, b []byte, _ protocol.Version) (int, error) {
 	startLen := len(b)
-	frame := &CryptoFrame{}
 	offset, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
 	frame.Offset = protocol.ByteCount(offset)
 	dataLen, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
 	b = b[l:]
 	if dataLen > uint64(len(b)) {
-		return nil, 0, io.EOF
+		return 0, io.EOF
 	}
 	if dataLen != 0 {
 		frame.Data = make([]byte, dataLen)
 		copy(frame.Data, b)
+	} else {
+		frame.Data = nil
 	}
-	return frame, startLen - len(b) + int(dataLen), nil
+	return startLen - len(b) + int(dataLen), nil
 }
 
 func (f *CryptoFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {

@@ -13,23 +13,22 @@ type StreamsBlockedFrame struct {
 	StreamLimit protocol.StreamNum
 }
 
-func parseStreamsBlockedFrame(b []byte, typ uint64, _ protocol.Version) (*StreamsBlockedFrame, int, error) {
-	f := &StreamsBlockedFrame{}
+func parseStreamsBlockedFrame(frame *StreamsBlockedFrame, b []byte, typ uint64, _ protocol.Version) (int, error) {
 	switch typ {
 	case bidiStreamBlockedFrameType:
-		f.Type = protocol.StreamTypeBidi
+		frame.Type = protocol.StreamTypeBidi
 	case uniStreamBlockedFrameType:
-		f.Type = protocol.StreamTypeUni
+		frame.Type = protocol.StreamTypeUni
 	}
 	streamLimit, l, err := quicvarint.Parse(b)
 	if err != nil {
-		return nil, 0, replaceUnexpectedEOF(err)
+		return 0, replaceUnexpectedEOF(err)
 	}
-	f.StreamLimit = protocol.StreamNum(streamLimit)
-	if f.StreamLimit > protocol.MaxStreamCount {
-		return nil, 0, fmt.Errorf("%d exceeds the maximum stream count", f.StreamLimit)
+	frame.StreamLimit = protocol.StreamNum(streamLimit)
+	if frame.StreamLimit > protocol.MaxStreamCount {
+		return 0, fmt.Errorf("%d exceeds the maximum stream count", frame.StreamLimit)
 	}
-	return f, l, nil
+	return l, nil
 }
 
 func (f *StreamsBlockedFrame) Append(b []byte, _ protocol.Version) ([]byte, error) {
