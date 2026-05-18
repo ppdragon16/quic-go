@@ -403,8 +403,6 @@ func (h *sentPacketHandler) ReceivedAck(ack *wire.AckFrame, encLevel protocol.En
 	// After this point, we must not use ackedPackets any longer!
 	// We've already returned the buffers.
 	ackedPackets = nil       //nolint:ineffassign // This is just to be on the safe side.
-	h.ackedPacketsInfo = nil //nolint:ineffassign // This is just to be on the safe side.
-	h.lostPacketsInfo = nil  //nolint:ineffassign // This is just to be on the safe side.
 
 	// Reset the pto_count unless the client is unsure if the server has validated the client's address.
 	if h.peerCompletedAddressValidation {

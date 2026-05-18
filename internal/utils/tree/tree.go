@@ -285,9 +285,6 @@ func deleteNode[T Val[T]](n *Node[T], value T, deleted *bool) *Node[T] {
 	}
 
 	// re-balance
-	if n == nil {
-		return n
-	}
 	n.height = n.maxHeight() + 1
 	bal := balance(n)
 	if bal > 1 {

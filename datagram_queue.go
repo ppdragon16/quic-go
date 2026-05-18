@@ -32,13 +32,16 @@ type datagramQueue struct {
 }
 
 func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
-	return &datagramQueue{
-		hasData: hasData,
-		rcvd:    make(chan struct{}, 1),
-		sent:    make(chan struct{}, 1),
-		closed:  make(chan struct{}),
-		logger:  logger,
+	q := &datagramQueue{
+		hasData:  hasData,
+		rcvQueue: make([][]byte, 0, maxDatagramRcvQueueLen),
+		rcvd:     make(chan struct{}, 1),
+		sent:     make(chan struct{}, 1),
+		closed:   make(chan struct{}),
+		logger:   logger,
 	}
+	q.sendQueue.Init(maxDatagramSendQueueLen)
+	return q
 }
 
 // Add queues a new DATAGRAM frame for sending.
