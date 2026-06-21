@@ -344,6 +344,11 @@ type Config struct {
 	EnableDatagrams    bool
 	Tracer             func(context.Context, logging.Perspective, ConnectionID) *logging.ConnectionTracer
 	CapabilityCallback func(n int64)
+	// InitialCongestionControl, if set, replaces the default CUBIC sender.
+	// This avoids allocating a CUBIC sender that would be immediately replaced
+	// via SetCongestionControl. The connection calls SetRTTStatsProvider before
+	// any congestion control methods are invoked.
+	InitialCongestionControl congestion.CongestionControl
 }
 
 // ClientHelloInfo contains information about an incoming connection attempt.

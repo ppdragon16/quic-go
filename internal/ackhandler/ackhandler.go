@@ -1,6 +1,7 @@
 package ackhandler
 
 import (
+	"github.com/daeuniverse/quic-go/congestion"
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/utils"
 	"github.com/daeuniverse/quic-go/logging"
@@ -18,7 +19,8 @@ func NewAckHandler(
 	pers protocol.Perspective,
 	tracer *logging.ConnectionTracer,
 	logger utils.Logger,
+	initialCC congestion.CongestionControl,
 ) (SentPacketHandler, ReceivedPacketHandler) {
-	sph := newSentPacketHandler(initialPacketNumber, initialMaxDatagramSize, rttStats, clientAddressValidated, enableECN, pers, tracer, logger)
+	sph := newSentPacketHandler(initialPacketNumber, initialMaxDatagramSize, rttStats, clientAddressValidated, enableECN, pers, tracer, logger, initialCC)
 	return sph, newReceivedPacketHandler(sph, logger)
 }
