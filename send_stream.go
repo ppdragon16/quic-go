@@ -58,6 +58,7 @@ type sendStream struct {
 	writeChan chan struct{}
 	writeOnce chan struct{}
 	deadline  time.Time
+	deadlineTimer *utils.Timer // lazily allocated, reused across Write calls
 
 	flowController flowcontrol.StreamFlowController
 }
@@ -126,7 +127,6 @@ func (s *sendStream) write(p []byte) (bool /* is newly completed */, int, error)
 	s.dataForWriting = p
 
 	var (
-		deadlineTimer  *utils.Timer
 		bytesWritten   int
 		notifiedSender bool
 	)
@@ -163,11 +163,11 @@ func (s *sendStream) write(p []byte) (bool /* is newly completed */, int, error)
 					s.dataForWriting = nil
 					return false, bytesWritten, errDeadline
 				}
-				if deadlineTimer == nil {
-					deadlineTimer = utils.NewTimer()
-					defer deadlineTimer.Stop()
+				if s.deadlineTimer == nil {
+					s.deadlineTimer = utils.NewTimer()
+					defer s.deadlineTimer.Stop()
 				}
-				deadlineTimer.Reset(deadline)
+				s.deadlineTimer.Reset(deadline)
 			}
 			if s.dataForWriting == nil || s.finalError != nil {
 				break
@@ -188,8 +188,8 @@ func (s *sendStream) write(p []byte) (bool /* is newly completed */, int, error)
 		} else {
 			select {
 			case <-s.writeChan:
-			case <-deadlineTimer.Chan():
-				deadlineTimer.SetRead()
+			case <-s.deadlineTimer.Chan():
+				s.deadlineTimer.SetRead()
 			}
 		}
 		s.mutex.Lock()

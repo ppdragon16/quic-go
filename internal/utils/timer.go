@@ -54,4 +54,6 @@ func (t *Timer) Deadline() time.Time {
 // Stop stops the timer
 func (t *Timer) Stop() {
 	t.t.Stop()
+	t.read = true    // prevent Reset from attempting to drain an empty channel
+	t.deadline = time.Time{} // prevent Reset from short-circuiting on a stopped timer
 }

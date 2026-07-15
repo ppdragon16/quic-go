@@ -51,7 +51,8 @@ type receiveStream struct {
 
 	readChan chan struct{}
 	readOnce chan struct{} // cap: 1, to protect against concurrent use of Read
-	deadline time.Time
+	deadline      time.Time
+	deadlineTimer *utils.Timer // lazily allocated, reused across Read calls
 
 	flowController flowcontrol.StreamFlowController
 }
@@ -142,7 +143,6 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 	}
 
 	var bytesRead int
-	var deadlineTimer *utils.Timer
 	for bytesRead < len(p) {
 		if s.currentFrame == nil || s.readPosInFrame >= len(s.currentFrame) {
 			s.dequeueNextFrame()
@@ -166,11 +166,11 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 				if !time.Now().Before(deadline) {
 					return hasStreamWindowUpdate, hasConnWindowUpdate, bytesRead, errDeadline
 				}
-				if deadlineTimer == nil {
-					deadlineTimer = utils.NewTimer()
-					defer deadlineTimer.Stop()
+				if s.deadlineTimer == nil {
+					s.deadlineTimer = utils.NewTimer()
+					defer s.deadlineTimer.Stop()
 				}
-				deadlineTimer.Reset(deadline)
+				s.deadlineTimer.Reset(deadline)
 			}
 
 			if s.currentFrame != nil || s.currentFrameIsLast {
@@ -183,8 +183,8 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 			} else {
 				select {
 				case <-s.readChan:
-				case <-deadlineTimer.Chan():
-					deadlineTimer.SetRead()
+				case <-s.deadlineTimer.Chan():
+					s.deadlineTimer.SetRead()
 				}
 			}
 			s.mutex.Lock()

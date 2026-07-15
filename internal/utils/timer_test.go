@@ -138,6 +138,26 @@ func TestTimerSameDeadline(t *testing.T) {
 	})
 }
 
+func TestTimerStopThenResetSameDeadline(t *testing.T) {
+	// Regression test: after Stop (e.g. between Read/Write calls),
+	// Reset with the same deadline must re-arm the timer.
+	// Previously, Stop did not clear t.deadline, so Reset would
+	// short-circuit and leave the timer stopped, causing indefinite blocking.
+	deadline := time.Now().Add(testDuration)
+	timer := NewTimer()
+	timer.Reset(deadline)
+	timer.Stop()
+
+	// Reset with the same deadline after Stop. Must re-arm.
+	timer.Reset(deadline)
+
+	select {
+	case <-timer.Chan():
+	case <-time.After(2 * testDuration):
+		t.Fatal("timer should have fired after Reset following Stop")
+	}
+}
+
 func TestTimerStopping(t *testing.T) {
 	timer := NewTimer()
 	timer.Reset(time.Now().Add(testDuration))
