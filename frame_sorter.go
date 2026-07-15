@@ -23,6 +23,7 @@ type frameSorter struct {
 	queue   map[protocol.ByteCount]frameSorterEntry
 	readPos protocol.ByteCount
 	gapTree *tree.Btree[utils.ByteInterval]
+	gapBuf  []utils.ByteInterval // reused across Push calls to avoid allocations
 }
 
 var errDuplicateStreamData = errors.New("duplicate stream data")
@@ -31,6 +32,7 @@ func newFrameSorter() *frameSorter {
 	s := frameSorter{
 		gapTree: tree.New[utils.ByteInterval](),
 		queue:   make(map[protocol.ByteCount]frameSorterEntry),
+		gapBuf:  make([]utils.ByteInterval, 0, 4),
 	}
 	s.gapTree.Insert(utils.ByteInterval{Start: 0, End: protocol.MaxByteCount})
 	return &s
@@ -56,7 +58,9 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 	end := offset + protocol.ByteCount(len(data))
 	covInterval := utils.ByteInterval{Start: start, End: end}
 
-	gaps := s.gapTree.Match(covInterval)
+	gaps := s.gapBuf[:0]
+	gaps = s.gapTree.MatchInto(covInterval, gaps)
+	s.gapBuf = gaps
 
 	if len(gaps) == 0 {
 		// No overlap with any existing gap

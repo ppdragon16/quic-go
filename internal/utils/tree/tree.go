@@ -29,6 +29,7 @@ package tree
 
 import (
 	"fmt"
+	"sync"
 )
 
 type Val[T any] interface {
@@ -38,9 +39,10 @@ type Val[T any] interface {
 
 // Btree represents an AVL tree
 type Btree[T Val[T]] struct {
-	root   *Node[T]
-	values []T
-	len    int
+	root     *Node[T]
+	values   []T
+	len      int
+	nodePool sync.Pool // pool for *Node[T] to reduce GC pressure
 }
 
 // Node represents a node in the tree with a value, left and right children, and a height/balance of the node.
@@ -58,6 +60,9 @@ func (t *Btree[T]) Init() *Btree[T] {
 	t.root = nil
 	t.values = nil
 	t.len = 0
+	t.nodePool = sync.Pool{
+		New: func() any { return new(Node[T]) },
+	}
 	return t
 }
 
@@ -79,7 +84,7 @@ func (t *Btree[T]) NotEmpty() bool {
 // Insert inserts a new value into the tree and returns the tree pointer
 func (t *Btree[T]) Insert(value T) *Btree[T] {
 	added := false
-	t.root = insert(t.root, value, &added)
+	t.root = t.insertNode(t.root, value, &added)
 	if added {
 		t.len++
 	}
@@ -87,16 +92,23 @@ func (t *Btree[T]) Insert(value T) *Btree[T] {
 	return t
 }
 
-func insert[T Val[T]](n *Node[T], value T, added *bool) *Node[T] {
+func (t *Btree[T]) insertNode(n *Node[T], value T, added *bool) *Node[T] {
 	if n == nil {
 		*added = true
-		return (&Node[T]{Value: value}).Init()
+		var node *Node[T]
+		if v := t.nodePool.Get(); v != nil {
+			node = v.(*Node[T])
+		} else {
+			node = &Node[T]{}
+		}
+		node.Value = value
+		return node.Init()
 	}
 	c := value.Comp(n.Value)
 	if c > 0 {
-		n.right = insert(n.right, value, added)
+		n.right = t.insertNode(n.right, value, added)
 	} else if c < 0 {
-		n.left = insert(n.left, value, added)
+		n.left = t.insertNode(n.left, value, added)
 	} else {
 		n.Value = value
 		*added = false
@@ -179,6 +191,15 @@ func (t *Btree[T]) Match(cond T) []T {
 	return matches
 }
 
+// MatchInto appends all values matching cond to buf and returns the resulting slice.
+// Pass a zero-length slice with sufficient capacity to avoid allocations.
+func (t *Btree[T]) MatchInto(cond T, buf []T) []T {
+	if t.root != nil {
+		t.root.matchInto(cond, &buf)
+	}
+	return buf
+}
+
 // Len return the number of nodes in the tree
 func (t *Btree[T]) Len() int {
 	return t.len
@@ -239,7 +260,7 @@ func (t *Btree[T]) Values() []T {
 // Delete deletes the node from the tree associated with the search value
 func (t *Btree[T]) Delete(value T) *Btree[T] {
 	deleted := false
-	t.root = deleteNode(t.root, value, &deleted)
+	t.root = t.deleteNode(t.root, value, &deleted)
 	if deleted {
 		t.len--
 	}
@@ -255,7 +276,7 @@ func (t *Btree[T]) DeleteAll(values []T) *Btree[T] {
 	return t
 }
 
-func deleteNode[T Val[T]](n *Node[T], value T, deleted *bool) *Node[T] {
+func (t *Btree[T]) deleteNode(n *Node[T], value T, deleted *bool) *Node[T] {
 	if n == nil {
 		return n
 	}
@@ -263,24 +284,26 @@ func deleteNode[T Val[T]](n *Node[T], value T, deleted *bool) *Node[T] {
 	c := value.Comp(n.Value)
 
 	if c < 0 {
-		n.left = deleteNode(n.left, value, deleted)
+		n.left = t.deleteNode(n.left, value, deleted)
 	} else if c > 0 {
-		n.right = deleteNode(n.right, value, deleted)
+		n.right = t.deleteNode(n.right, value, deleted)
 	} else {
 		if n.left == nil {
-			t := n.right
+			tr := n.right
 			n.Init()
+			t.nodePool.Put(n)
 			*deleted = true
-			return t
+			return tr
 		} else if n.right == nil {
-			t := n.left
+			tl := n.left
 			n.Init()
+			t.nodePool.Put(n)
 			*deleted = true
-			return t
+			return tl
 		}
-		t := n.right.min()
-		n.Value = t.Value
-		n.right = deleteNode(n.right, t.Value, deleted)
+		minNode := n.right.min()
+		n.Value = minNode.Value
+		n.right = t.deleteNode(n.right, minNode.Value, deleted)
 		*deleted = true
 	}
 
@@ -440,6 +463,28 @@ func (n *Node[T]) match(cond T, results *[]T) {
 		*results = append(*results, n.Value)
 		if n.right != nil {
 			n.right.match(cond, results)
+		}
+	}
+}
+
+func (n *Node[T]) matchInto(cond T, results *[]T) {
+	c := n.Value.Match(cond)
+	if c > 0 {
+		if n.left != nil {
+			n.left.matchInto(cond, results)
+		}
+	} else if c < 0 {
+		if n.right != nil {
+			n.right.matchInto(cond, results)
+		}
+	} else {
+		// other matching nodes could be on both sides
+		if n.left != nil {
+			n.left.matchInto(cond, results)
+		}
+		*results = append(*results, n.Value)
+		if n.right != nil {
+			n.right.matchInto(cond, results)
 		}
 	}
 }
