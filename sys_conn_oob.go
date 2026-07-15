@@ -182,9 +182,15 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 	buffer := c.buffers[c.readPos]
 	c.readPos++
 
+	// Store the *net.UDPAddr (allocated by ReadBatch) in the buffer
+	// so it gets recycled via the addr pool when the buffer is released.
+	if udpAddr, ok := msg.Addr.(*net.UDPAddr); ok {
+		buffer.addr = udpAddr
+	}
+
 	data := msg.OOB[:msg.NN]
 	p := receivedPacket{
-		remoteAddr: msg.Addr,
+		remoteAddr: buffer.addr,
 		rcvTime:    time.Now(),
 		data:       msg.Buffers[0][:msg.N],
 		buffer:     buffer,

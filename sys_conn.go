@@ -2,6 +2,7 @@ package quic
 
 import (
 	"net"
+	"net/netip"
 	"syscall"
 	"time"
 
@@ -70,12 +71,43 @@ func (c *basicConn) ReadPacket() (receivedPacket, error) {
 	// The packet size should not exceed protocol.MaxPacketBufferSize bytes
 	// If it does, we only read a truncated packet, which will then end up undecryptable
 	buffer.Data = buffer.Data[:protocol.MaxPacketBufferSize]
+
+	// Fast path: use ReadFromUDPAddrPort / ReadFromAddrPort (Go 1.18+) to get
+	// netip.AddrPort without heap allocation, then fill a pooled *net.UDPAddr.
+	var n int
+	var addrPort netip.AddrPort
+	var err error
+
+	if udpConn, ok := c.PacketConn.(*net.UDPConn); ok {
+		n, addrPort, err = udpConn.ReadFromUDPAddrPort(buffer.Data)
+	} else if apr, ok := c.PacketConn.(interface {
+		ReadFromAddrPort(p []byte) (n int, addr netip.AddrPort, err error)
+	}); ok {
+		n, addrPort, err = apr.ReadFromAddrPort(buffer.Data)
+	}
+	if err != nil {
+		return receivedPacket{}, err
+	}
+	if addrPort.IsValid() {
+		buffer.addr = getPooledAddr(addrPort)
+		return receivedPacket{
+			remoteAddr: buffer.addr,
+			rcvTime:    time.Now(),
+			data:       buffer.Data[:n],
+			buffer:     buffer,
+		}, nil
+	}
+
+	// Fallback: use net.PacketConn.ReadFrom.
+	// The *net.UDPAddr is allocated by the stdlib, but we store it in buffer.addr
+	// so it gets recycled via the addr pool when the buffer is released.
 	n, addr, err := c.PacketConn.ReadFrom(buffer.Data)
 	if err != nil {
 		return receivedPacket{}, err
 	}
+	buffer.addr = addr.(*net.UDPAddr)
 	return receivedPacket{
-		remoteAddr: addr,
+		remoteAddr: buffer.addr,
 		rcvTime:    time.Now(),
 		data:       buffer.Data[:n],
 		buffer:     buffer,
