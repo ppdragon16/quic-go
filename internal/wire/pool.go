@@ -19,6 +19,7 @@ func init() {
 
 func GetStreamFrame() *StreamFrame {
 	f := pool.Get().(*StreamFrame)
+	f.Data = f.Data[:0]
 	return f
 }
 

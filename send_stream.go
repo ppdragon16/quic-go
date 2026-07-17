@@ -298,13 +298,14 @@ func (s *sendStream) popNewStreamFrame(maxBytes, sendWindow protocol.ByteCount, 
 		}
 		nextFrame := s.nextFrame
 		s.nextFrame = nil
-		if nextFrame.DataLen() > maxDataLen {
+		dataLen := nextFrame.DataLen()
+		if dataLen > maxDataLen {
 			s.nextFrame = wire.GetStreamFrame()
 			s.nextFrame.StreamID = s.streamID
 			s.nextFrame.Offset = s.writeOffset + maxDataLen
-			s.nextFrame.Data = s.nextFrame.Data[:nextFrame.DataLen()-maxDataLen]
+			s.nextFrame.Data = s.nextFrame.Data[:dataLen-maxDataLen]
 			s.nextFrame.DataLenPresent = true
-			copy(s.nextFrame.Data, nextFrame.Data[maxDataLen:])
+			copy(s.nextFrame.Data, nextFrame.Data[maxDataLen:dataLen])
 			nextFrame.Data = nextFrame.Data[:maxDataLen]
 		} else {
 			s.signalWrite()
