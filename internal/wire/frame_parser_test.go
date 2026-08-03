@@ -327,7 +327,8 @@ func TestFrameParsingUnpacksDatagramFrames(t *testing.T) {
 	require.NoError(t, err)
 	l, frame, err := parser.ParseNext(b, protocol.Encryption1RTT, protocol.Version1)
 	require.NoError(t, err)
-	require.Equal(t, f, frame)
+	require.Equal(t, f.Data, frame.(*DatagramFrame).Data)
+	require.Equal(t, f.DataLenPresent, frame.(*DatagramFrame).DataLenPresent)
 	require.Equal(t, len(b), l)
 }
 

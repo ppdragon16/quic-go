@@ -290,6 +290,10 @@ func (c *connection) sendDatagram(streamID protocol.StreamID, b []byte) error {
 	return c.Connection.SendDatagram(data)
 }
 
+func (c *connection) ReleaseDatagram(data []byte) {
+	c.Connection.ReleaseDatagram(data)
+}
+
 func (c *connection) receiveDatagrams() error {
 	for {
 		b, err := c.Connection.ReceiveDatagram(context.Background())

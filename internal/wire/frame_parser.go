@@ -60,7 +60,9 @@ type FrameParser struct {
 	pathChallengeFrame      PathChallengeFrame
 	pathResponseFrame       PathResponseFrame
 	cryptoFrame             CryptoFrame
-	datagramFrame           DatagramFrame
+	// datagramFrame: removed pre-allocated field — parseDatagramFrame now
+	// returns a pooled frame (GetDatagramFrame) instead of filling a
+	// parser-owned struct. This pools both the frame and its Data buffer.
 	connectionCloseFrame    ConnectionCloseFrame
 }
 
@@ -174,8 +176,7 @@ func (p *FrameParser) parseFrame(b []byte, typ uint64, encLevel protocol.Encrypt
 			frame = &p.handshakeDoneFrame
 		case 0x30, 0x31:
 			if p.supportsDatagrams {
-				l, err = parseDatagramFrame(&p.datagramFrame, b, typ, v)
-					frame = &p.datagramFrame
+				frame, l, err = parseDatagramFrame(b, typ, v)
 				break
 			}
 			fallthrough

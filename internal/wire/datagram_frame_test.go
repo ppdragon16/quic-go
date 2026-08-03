@@ -12,9 +12,9 @@ import (
 func TestParseDatagramFrameWithLength(t *testing.T) {
 	data := encodeVarInt(0x6) // length
 	data = append(data, []byte("foobar")...)
-	var frame DatagramFrame
-	l, err := parseDatagramFrame(&frame, data, 0x30^0x1, protocol.Version1)
+	frame, l, err := parseDatagramFrame(data, 0x30^0x1, protocol.Version1)
 	require.NoError(t, err)
+	defer PutDatagramFrame(frame)
 	require.Equal(t, []byte("foobar"), frame.Data)
 	require.True(t, frame.DataLenPresent)
 	require.Equal(t, len(data), l)
@@ -22,9 +22,9 @@ func TestParseDatagramFrameWithLength(t *testing.T) {
 
 func TestParseDatagramFrameWithoutLength(t *testing.T) {
 	data := []byte("Lorem ipsum dolor sit amet")
-	var frame DatagramFrame
-	l, err := parseDatagramFrame(&frame, data, 0x30, protocol.Version1)
+	frame, l, err := parseDatagramFrame(data, 0x30, protocol.Version1)
 	require.NoError(t, err)
+	defer PutDatagramFrame(frame)
 	require.Equal(t, []byte("Lorem ipsum dolor sit amet"), frame.Data)
 	require.False(t, frame.DataLenPresent)
 	require.Equal(t, len(data), l)
@@ -33,8 +33,7 @@ func TestParseDatagramFrameWithoutLength(t *testing.T) {
 func TestParseDatagramFrameErrorsOnLengthLongerThanFrame(t *testing.T) {
 	data := encodeVarInt(0x6) // length
 	data = append(data, []byte("fooba")...)
-	var frame DatagramFrame
-	_, err := parseDatagramFrame(&frame, data, 0x30^0x1, protocol.Version1)
+	_, _, err := parseDatagramFrame(data, 0x30^0x1, protocol.Version1)
 	require.Equal(t, io.EOF, err)
 }
 
@@ -42,12 +41,12 @@ func TestParseDatagramFrameErrorsOnEOFs(t *testing.T) {
 	const typ = 0x30 ^ 0x1
 	data := encodeVarInt(6) // length
 	data = append(data, []byte("foobar")...)
-	var frame DatagramFrame
-	l, err := parseDatagramFrame(&frame, data, typ, protocol.Version1)
+	frame, l, err := parseDatagramFrame(data, typ, protocol.Version1)
 	require.NoError(t, err)
+	defer PutDatagramFrame(frame)
 	require.Equal(t, len(data), l)
 	for i := range data {
-		_, err = parseDatagramFrame(&frame, data[0:i], typ, protocol.Version1)
+		_, _, err = parseDatagramFrame(data[0:i], typ, protocol.Version1)
 		require.Equal(t, io.EOF, err)
 	}
 }

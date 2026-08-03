@@ -206,6 +206,13 @@ type Connection interface {
 	SendDatagram(payload []byte) error
 	// ReceiveDatagram gets a message received in a datagram, as specified in RFC 9221.
 	ReceiveDatagram(context.Context) ([]byte, error)
+	// ReleaseDatagram returns a datagram buffer previously handed out by
+	// ReceiveDatagram back to the internal pool. Callers MUST call it exactly
+	// once per datagram once the buffer is no longer referenced. Failing to do
+	// so leaks the buffer into the pool's live set; calling it on a buffer not
+	// obtained from ReceiveDatagram (or twice) is undefined behavior. It is a
+	// no-op for oversized buffers that were never pooled.
+	ReleaseDatagram([]byte)
 
 	// Replace the current congestion control algorithm with a new one.
 	SetCongestionControl(congestion.CongestionControl)

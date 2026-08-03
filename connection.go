@@ -2320,7 +2320,8 @@ func (s *connection) SendDatagram(p []byte) error {
 		return errors.New("datagram support disabled")
 	}
 
-	f := &wire.DatagramFrame{DataLenPresent: true}
+	f := wire.GetDatagramFrame()
+	f.DataLenPresent = true
 	// The payload size estimate is conservative.
 	// Under many circumstances we could send a few more bytes.
 	maxDataLen := min(
@@ -2328,11 +2329,18 @@ func (s *connection) SendDatagram(p []byte) error {
 		protocol.ByteCount(s.maxPayloadSizeEstimate.Load()),
 	)
 	if protocol.ByteCount(len(p)) > maxDataLen {
+		wire.PutDatagramFrame(f)
 		return &DatagramTooLargeError{
 			MaxDataLen: int64(maxDataLen),
 		}
 	}
-	f.Data = make([]byte, len(p))
+	if protocol.ByteCount(cap(f.Data)) < protocol.ByteCount(len(p)) {
+		// Oversized datagram (larger than the pool cap): allocate fresh;
+		// PutDatagramFrame will skip pooling it back.
+		f.Data = make([]byte, len(p))
+	} else {
+		f.Data = f.Data[:len(p)]
+	}
 	copy(f.Data, p)
 	return s.datagramQueue.Add(f)
 }
@@ -2342,6 +2350,10 @@ func (s *connection) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 		return nil, errors.New("datagram support disabled")
 	}
 	return s.datagramQueue.Receive(ctx)
+}
+
+func (s *connection) ReleaseDatagram(data []byte) {
+	s.datagramQueue.ReleaseDatagram(data)
 }
 
 func (s *connection) LocalAddr() net.Addr  { return s.conn.LocalAddr() }

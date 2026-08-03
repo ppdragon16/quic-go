@@ -546,6 +546,42 @@ func (c *MockEarlyConnectionReceiveDatagramCall) DoAndReturn(f func(context.Cont
 	return c
 }
 
+// ReleaseDatagram mocks base method.
+func (m *MockEarlyConnection) ReleaseDatagram(arg0 []byte) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ReleaseDatagram", arg0)
+}
+
+// ReleaseDatagram indicates an expected call of ReleaseDatagram.
+func (mr *MockEarlyConnectionMockRecorder) ReleaseDatagram(arg0 any) *MockEarlyConnectionReleaseDatagramCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseDatagram", reflect.TypeOf((*MockEarlyConnection)(nil).ReleaseDatagram), arg0)
+	return &MockEarlyConnectionReleaseDatagramCall{Call: call}
+}
+
+// MockEarlyConnectionReleaseDatagramCall wrap *gomock.Call
+type MockEarlyConnectionReleaseDatagramCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockEarlyConnectionReleaseDatagramCall) Return() *MockEarlyConnectionReleaseDatagramCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockEarlyConnectionReleaseDatagramCall) Do(f func([]byte)) *MockEarlyConnectionReleaseDatagramCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockEarlyConnectionReleaseDatagramCall) DoAndReturn(f func([]byte)) *MockEarlyConnectionReleaseDatagramCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // RemoteAddr mocks base method.
 func (m *MockEarlyConnection) RemoteAddr() net.Addr {
 	m.ctrl.T.Helper()
