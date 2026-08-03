@@ -1975,6 +1975,9 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 	maxSize := s.maxPacketSize()
 
 	ecn := s.sentPacketHandler.ECNMode(true)
+	var segSize protocol.ByteCount
+	var lastSize protocol.ByteCount
+	var stopMerging bool
 	for {
 		var dontSendMore bool
 		size, err := s.appendOneShortHeaderPacket(buf, maxSize, ecn, now)
@@ -1987,6 +1990,13 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 				return nil
 			}
 			dontSendMore = true
+		} else {
+			if segSize == 0 {
+				segSize = size
+			} else if stopMerging || size != lastSize {
+				stopMerging = true
+			}
+			lastSize = size
 		}
 
 		if !dontSendMore {
@@ -2007,11 +2017,15 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 		// 2. The last packet appended was a full-size packet
 		// 3. The next packet will have the same ECN marking
 		// 4. We still have enough space for another full-size packet in the buffer
-		if !dontSendMore && size == maxSize && nextECN == ecn && buf.Len()+maxSize <= buf.Cap() {
+		if !dontSendMore && !stopMerging && segSize > 0 && size == segSize && nextECN == ecn && buf.Len()+segSize <= buf.Cap() {
 			continue
 		}
 
-		s.sendQueue.Send(buf, uint16(maxSize), ecn)
+		s.sendQueue.Send(buf, uint16(segSize), ecn)
+			// Reset the batch state: the next batch starts fresh
+			segSize = 0
+			lastSize = 0
+			stopMerging = false
 
 		if dontSendMore {
 			return nil
