@@ -20,10 +20,11 @@ type frameSorterEntry struct {
 }
 
 type frameSorter struct {
-	queue   map[protocol.ByteCount]frameSorterEntry
-	readPos protocol.ByteCount
-	gapTree *tree.Btree[utils.ByteInterval]
-	gapBuf  []utils.ByteInterval // reused across Push calls to avoid allocations
+	queue     map[protocol.ByteCount]frameSorterEntry
+	queuePeak int
+	readPos   protocol.ByteCount
+	gapTree   *tree.Btree[utils.ByteInterval]
+	gapBuf    []utils.ByteInterval // reused across Push calls to avoid allocations
 }
 
 var errDuplicateStreamData = errors.New("duplicate stream data")
@@ -187,6 +188,9 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 	}
 
 	s.queue[start] = frameSorterEntry{Data: data, DoneCb: doneCb}
+	if len(s.queue) > s.queuePeak {
+		s.queuePeak = len(s.queue)
+	}
 	return nil
 }
 
@@ -214,6 +218,10 @@ func (s *frameSorter) Pop() (protocol.ByteCount, []byte, func()) {
 	delete(s.queue, s.readPos)
 	offset := s.readPos
 	s.readPos += protocol.ByteCount(len(entry.Data))
+	if len(s.queue) == 0 && s.queuePeak > 256 {
+		s.queue = make(map[protocol.ByteCount]frameSorterEntry)
+		s.queuePeak = 0
+	}
 	return offset, entry.Data, entry.DoneCb
 }
 
