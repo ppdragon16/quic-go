@@ -99,6 +99,7 @@ var _ = Describe("Streams Map", func() {
 					MaxBidiStreamNum,
 					MaxUniStreamNum,
 					perspective,
+					nil,
 				)
 			})
 

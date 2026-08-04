@@ -44,6 +44,7 @@ var _ = Describe("Streams Map (outgoing)", func() {
 			streamType,
 			newStr,
 			func(f wire.Frame) { queuedControlFrames = append(queuedControlFrames, f) },
+					nil,
 		)
 	})
 
