@@ -152,8 +152,7 @@ func (h *datagramQueue) Pop() {
 func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 	buf := datagramBufPool.Get()
 	if cap(buf) < len(f.Data) {
-		// Oversized datagram (larger than the pool cap); allocate fresh and
-		// ReleaseDatagram will skip pooling it (cap check).
+		datagramBufPool.Put(buf)
 		buf = make([]byte, len(f.Data))
 	} else {
 		buf = buf[:len(f.Data)]
