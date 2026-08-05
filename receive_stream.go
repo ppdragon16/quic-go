@@ -33,7 +33,7 @@ type receiveStream struct {
 	finalOffset protocol.ByteCount
 
 	currentFrame       []byte
-	currentFrameDone   func()
+	currentFrameFrame  *wire.StreamFrame // nil for crypto streams; non-nil → PutBack when done
 	readPosInFrame     int
 	currentFrameIsLast bool // is the currentFrame the last frame on this stream
 
@@ -219,8 +219,8 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 
 		if s.readPosInFrame >= len(s.currentFrame) && s.currentFrameIsLast {
 			s.currentFrame = nil
-			if s.currentFrameDone != nil {
-				s.currentFrameDone()
+			if s.currentFrameFrame != nil {
+				s.currentFrameFrame.PutBack()
 			}
 			s.errorRead = true
 			return hasStreamWindowUpdate, hasConnWindowUpdate, bytesRead, io.EOF
@@ -232,10 +232,10 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 func (s *receiveStream) dequeueNextFrame() {
 	var offset protocol.ByteCount
 	// We're done with the last frame. Release the buffer.
-	if s.currentFrameDone != nil {
-		s.currentFrameDone()
+	if s.currentFrameFrame != nil {
+		s.currentFrameFrame.PutBack()
 	}
-	offset, s.currentFrame, s.currentFrameDone = s.frameQueue.Pop()
+	offset, s.currentFrame, s.currentFrameFrame = s.frameQueue.Pop()
 	s.currentFrameIsLast = offset+protocol.ByteCount(len(s.currentFrame)) >= s.finalOffset
 	s.readPosInFrame = 0
 }
@@ -296,7 +296,7 @@ func (s *receiveStream) handleStreamFrameImpl(frame *wire.StreamFrame, now time.
 	if s.cancelledLocally {
 		return nil
 	}
-	if err := s.frameQueue.Push(frame.Data, frame.Offset, frame.PutBack); err != nil {
+	if err := s.frameQueue.Push(frame.Data, frame.Offset, frame); err != nil {
 		return err
 	}
 	s.signalRead()

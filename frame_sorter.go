@@ -6,17 +6,12 @@ import (
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/utils"
 	"github.com/daeuniverse/quic-go/internal/utils/tree"
+	"github.com/daeuniverse/quic-go/internal/wire"
 )
 
-// byteInterval is an interval from one ByteCount to the other
-type byteInterval struct {
-	Start protocol.ByteCount
-	End   protocol.ByteCount
-}
-
 type frameSorterEntry struct {
-	Data   []byte
-	DoneCb func()
+	Data  []byte
+	frame *wire.StreamFrame // nil for crypto frames; non-nil → call PutBack on cleanup
 }
 
 type frameSorter struct {
@@ -39,18 +34,18 @@ func newFrameSorter() *frameSorter {
 	return &s
 }
 
-func (s *frameSorter) Push(data []byte, offset protocol.ByteCount, doneCb func()) error {
-	err := s.push(data, offset, doneCb)
+func (s *frameSorter) Push(data []byte, offset protocol.ByteCount, frame *wire.StreamFrame) error {
+	err := s.push(data, offset, frame)
 	if err == errDuplicateStreamData {
-		if doneCb != nil {
-			doneCb()
+		if frame != nil {
+			frame.PutBack()
 		}
 		return nil
 	}
 	return err
 }
 
-func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()) error {
+func (s *frameSorter) push(data []byte, offset protocol.ByteCount, frame *wire.StreamFrame) error {
 	if len(data) == 0 {
 		return errDuplicateStreamData
 	}
@@ -98,8 +93,8 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 			delete(s.queue, pos)
 			pos += oldEntryLen
 			hasReplacedAtLeastOne = true
-			if oldEntry.DoneCb != nil {
-				oldEntry.DoneCb()
+			if oldEntry.frame != nil {
+				oldEntry.frame.PutBack()
 			}
 		} else {
 			if !hasReplacedAtLeastOne {
@@ -173,7 +168,7 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 		return errors.New("too many gaps in received data")
 	}
 
-	s.queue[start] = frameSorterEntry{Data: data, DoneCb: doneCb}
+	s.queue[start] = frameSorterEntry{Data: data, frame: frame}
 	if len(s.queue) > s.queuePeak {
 		s.queuePeak = len(s.queue)
 	}
@@ -189,14 +184,14 @@ func (s *frameSorter) deleteConsecutive(pos protocol.ByteCount) {
 		}
 		oldEntryLen := protocol.ByteCount(len(oldEntry.Data))
 		delete(s.queue, pos)
-		if oldEntry.DoneCb != nil {
-			oldEntry.DoneCb()
+		if oldEntry.frame != nil {
+			oldEntry.frame.PutBack()
 		}
 		pos += oldEntryLen
 	}
 }
 
-func (s *frameSorter) Pop() (protocol.ByteCount, []byte, func()) {
+func (s *frameSorter) Pop() (protocol.ByteCount, []byte, *wire.StreamFrame) {
 	entry, ok := s.queue[s.readPos]
 	if !ok {
 		return s.readPos, nil, nil
@@ -208,7 +203,7 @@ func (s *frameSorter) Pop() (protocol.ByteCount, []byte, func()) {
 		s.queue = make(map[protocol.ByteCount]frameSorterEntry)
 		s.queuePeak = 0
 	}
-	return offset, entry.Data, entry.DoneCb
+	return offset, entry.Data, entry.frame
 }
 
 // HasMoreData says if there is any more data queued at *any* offset.
