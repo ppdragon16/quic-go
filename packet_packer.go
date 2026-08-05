@@ -640,9 +640,7 @@ func (p *packetPacker) composeNextPacket(
 	hasRetransmission := p.retransmissionQueue.HasAppData()
 
 	var hasAck bool
-	pl := payload{
-		frames: make([]ackhandler.Frame, 0, 4),
-	}
+	var pl payload
 	if ackAllowed {
 		if ack := p.acks.GetAckFrame(protocol.Encryption1RTT, now, !hasRetransmission && !hasData); ack != nil {
 			pl.ack = ack
@@ -655,6 +653,9 @@ func (p *packetPacker) composeNextPacket(
 		if f := p.datagramQueue.Peek(); f != nil {
 			size := f.Length(v)
 			if size <= maxFrameSize-pl.length { // DATAGRAM frame fits
+				if pl.frames == nil {
+					pl.frames = make([]ackhandler.Frame, 0, 4)
+				}
 				pl.frames = append(pl.frames, ackhandler.Frame{Frame: f})
 				pl.length += size
 				p.datagramQueue.Pop()
@@ -683,6 +684,9 @@ func (p *packetPacker) composeNextPacket(
 			if f == nil {
 				break
 			}
+			if pl.frames == nil {
+				pl.frames = make([]ackhandler.Frame, 0, 4)
+			}
 			pl.frames = append(pl.frames, ackhandler.Frame{Frame: f, Handler: p.retransmissionQueue.AppDataAckHandler()})
 			pl.length += f.Length(v)
 		}
@@ -691,6 +695,12 @@ func (p *packetPacker) composeNextPacket(
 	if hasData {
 		var lengthAdded protocol.ByteCount
 		startLen := len(pl.frames)
+		if cap(pl.streamFrames) == 0 {
+			pl.streamFrames = make([]ackhandler.StreamFrame, 0, 2)
+		}
+		if pl.frames == nil {
+			pl.frames = make([]ackhandler.Frame, 0, 4)
+		}
 		pl.frames, pl.streamFrames, lengthAdded = p.framer.Append(pl.frames, pl.streamFrames, maxFrameSize-pl.length, now, v)
 		pl.length += lengthAdded
 		// add handlers for the control frames that were added
