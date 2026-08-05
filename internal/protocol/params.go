@@ -80,11 +80,6 @@ const MaxNonAckElicitingAcks = 19
 // prevents DoS attacks against the streamFrameSorter
 const MaxStreamFrameSorterGaps = 20000
 
-// MinStreamFrameBufferSize is the minimum data length of a received STREAM frame
-// that we use the buffer for. This protects against a DoS where an attacker would send us
-// very small STREAM frames to consume a lot of memory.
-const MinStreamFrameBufferSize = 128
-
 // MinCoalescedPacketSize is the minimum size of a coalesced packet that we pack.
 // If a packet has less than this number of bytes, we won't coalesce any more packets onto it.
 const MinCoalescedPacketSize = 128

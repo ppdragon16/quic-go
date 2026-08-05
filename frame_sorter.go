@@ -84,7 +84,6 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 	endGapEnd := endGap.End     // save it, in case endGap is modified
 
 	var adjustedStartGapEnd bool
-	var wasCut bool
 
 	pos := start
 	var hasReplacedAtLeastOne bool
@@ -110,7 +109,6 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 			// Cut the new frame such that the end aligns with the start of the existing frame.
 			data = data[:pos-start]
 			end = pos
-			wasCut = true
 			break
 		}
 	}
@@ -119,7 +117,6 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 		// cut the frame, such that it starts at the start of the gap
 		data = data[startGap.Start-start:]
 		start = startGap.Start
-		wasCut = true
 	}
 	if start <= startGap.Start {
 		if end >= startGap.End {
@@ -154,7 +151,6 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 		// cut the frame, such that it ends at the end of the gap
 		data = data[:endGapEnd-start]
 		end = endGapEnd
-		wasCut = true
 	}
 	if end == endGapEnd {
 		if !startGapEqualsEndGap {
@@ -170,16 +166,6 @@ func (s *frameSorter) push(data []byte, offset protocol.ByteCount, doneCb func()
 			endGap.Start = end
 			// Re-insert the gap, but with the new start.
 			s.gapTree.Insert(endGap)
-		}
-	}
-
-	if wasCut && len(data) < protocol.MinStreamFrameBufferSize {
-		newData := make([]byte, len(data))
-		copy(newData, data)
-		data = newData
-		if doneCb != nil {
-			doneCb()
-			doneCb = nil
 		}
 	}
 

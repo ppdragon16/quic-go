@@ -62,7 +62,7 @@ type FrameParser struct {
 	cryptoFrame             CryptoFrame
 	// datagramFrame: removed pre-allocated field — parseDatagramFrame now
 	// returns a pooled frame (GetDatagramFrame) instead of filling a
-	// parser-owned struct. This pools both the frame and its Data buffer.
+	// parser-owned struct. Data buffers are managed via GetBuffer/PutBuffer.
 	connectionCloseFrame    ConnectionCloseFrame
 }
 

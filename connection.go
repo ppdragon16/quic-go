@@ -22,6 +22,8 @@ import (
 	"github.com/daeuniverse/quic-go/internal/utils"
 	"github.com/daeuniverse/quic-go/internal/wire"
 	"github.com/daeuniverse/quic-go/logging"
+
+	quicpool "github.com/daeuniverse/quic-go/pool"
 )
 
 type unpacker interface {
@@ -2348,13 +2350,7 @@ func (s *connection) SendDatagram(p []byte) error {
 			MaxDataLen: int64(maxDataLen),
 		}
 	}
-	if protocol.ByteCount(cap(f.Data)) < protocol.ByteCount(len(p)) {
-		// Oversized datagram (larger than the pool cap): allocate fresh;
-		// PutDatagramFrame will skip pooling it back.
-		f.Data = make([]byte, len(p))
-	} else {
-		f.Data = f.Data[:len(p)]
-	}
+	f.Data = quicpool.GetBuffer(len(p))
 	copy(f.Data, p)
 	return s.datagramQueue.Add(f)
 }

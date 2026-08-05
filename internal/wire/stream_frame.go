@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
+	quicpool "github.com/daeuniverse/quic-go/pool"
 	"github.com/daeuniverse/quic-go/quicvarint"
 )
 
@@ -15,8 +16,6 @@ type StreamFrame struct {
 	Data           []byte
 	Fin            bool
 	DataLenPresent bool
-
-	fromPool bool
 }
 
 func parseStreamFrame(b []byte, typ uint64, _ protocol.Version) (*StreamFrame, int, error) {
@@ -56,28 +55,14 @@ func parseStreamFrame(b []byte, typ uint64, _ protocol.Version) (*StreamFrame, i
 		dataLen = uint64(len(b))
 	}
 
-	var frame *StreamFrame
-	if dataLen < protocol.MinStreamFrameBufferSize {
-		frame = &StreamFrame{}
-		if dataLen > 0 {
-			frame.Data = make([]byte, dataLen)
-		}
-	} else {
-		frame = GetStreamFrame()
-		// The STREAM frame can't be larger than the StreamFrame we obtained from the buffer,
-		// since those StreamFrames have a buffer length of the maximum packet size.
-		if dataLen > uint64(cap(frame.Data)) {
-			return nil, 0, io.EOF
-		}
-		frame.Data = frame.Data[:dataLen]
-	}
-
+	frame := GetStreamFrame()
 	frame.StreamID = protocol.StreamID(streamID)
 	frame.Offset = protocol.ByteCount(offset)
 	frame.Fin = fin
 	frame.DataLenPresent = hasDataLen
 
 	if dataLen > 0 {
+		frame.Data = quicpool.GetBuffer(int(dataLen))
 		copy(frame.Data, b)
 	}
 	if frame.Offset+frame.DataLen() > protocol.MaxByteCount {
@@ -174,13 +159,22 @@ func (f *StreamFrame) MaybeSplitOffFrame(maxSize protocol.ByteCount, version pro
 	new.Fin = false
 	new.DataLenPresent = f.DataLenPresent
 
-	// swap the data slices
-	new.Data, f.Data = f.Data, new.Data
-	new.fromPool, f.fromPool = f.fromPool, new.fromPool
+	// Allocate fresh for the split-off portion.
+	new.Data = quicpool.GetBuffer(int(n))
+	copy(new.Data, f.Data[:n])
 
-	f.Data = f.Data[:protocol.ByteCount(len(new.Data))-n]
-	copy(f.Data, new.Data[n:])
-	new.Data = new.Data[:n]
+	// Allocate fresh for the remainder — reslicing f.Data would reduce cap
+	// and break quicpool.PutBuffer's size-class matching (cap(buf) determines bucket).
+	remaining := len(f.Data) - int(n)
+	if remaining > 0 {
+		newRemaining := quicpool.GetBuffer(remaining)
+		copy(newRemaining, f.Data[n:])
+		quicpool.PutBuffer(f.Data)
+		f.Data = newRemaining
+	} else {
+		quicpool.PutBuffer(f.Data)
+		f.Data = nil
+	}
 	f.Offset += n
 
 	return new, true

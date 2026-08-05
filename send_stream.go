@@ -12,6 +12,8 @@ import (
 	"github.com/daeuniverse/quic-go/internal/qerr"
 	"github.com/daeuniverse/quic-go/internal/utils"
 	"github.com/daeuniverse/quic-go/internal/wire"
+
+	quicpool "github.com/daeuniverse/quic-go/pool"
 )
 
 type sendStreamI interface {
@@ -144,13 +146,17 @@ func (s *sendStream) write(p []byte) (bool /* is newly completed */, int, error)
 				f.Offset = s.writeOffset
 				f.StreamID = s.streamID
 				f.DataLenPresent = true
-				f.Data = f.Data[:len(s.dataForWriting)]
+				f.Data = quicpool.GetBuffer(len(s.dataForWriting))
 				copy(f.Data, s.dataForWriting)
 				s.nextFrame = f
 			} else {
-				l := len(s.nextFrame.Data)
-				s.nextFrame.Data = s.nextFrame.Data[:l+len(s.dataForWriting)]
-				copy(s.nextFrame.Data[l:], s.dataForWriting)
+				prevLen := len(s.nextFrame.Data)
+				newLen := prevLen + len(s.dataForWriting)
+				newData := quicpool.GetBuffer(newLen)
+				copy(newData, s.nextFrame.Data)
+				copy(newData[prevLen:], s.dataForWriting)
+				quicpool.PutBuffer(s.nextFrame.Data)
+				s.nextFrame.Data = newData
 			}
 			s.dataForWriting = nil
 			bytesWritten = len(p)
@@ -303,9 +309,11 @@ func (s *sendStream) popNewStreamFrame(maxBytes, sendWindow protocol.ByteCount, 
 			s.nextFrame = wire.GetStreamFrame()
 			s.nextFrame.StreamID = s.streamID
 			s.nextFrame.Offset = s.writeOffset + maxDataLen
-			s.nextFrame.Data = s.nextFrame.Data[:dataLen-maxDataLen]
 			s.nextFrame.DataLenPresent = true
+			rem := dataLen - maxDataLen
+			s.nextFrame.Data = quicpool.GetBuffer(int(rem))
 			copy(s.nextFrame.Data, nextFrame.Data[maxDataLen:dataLen])
+			// Prefix slice: cap preserved for PutBuffer size-class matching.
 			nextFrame.Data = nextFrame.Data[:maxDataLen]
 		} else {
 			s.signalWrite()
@@ -318,7 +326,7 @@ func (s *sendStream) popNewStreamFrame(maxBytes, sendWindow protocol.ByteCount, 
 	f.StreamID = s.streamID
 	f.Offset = s.writeOffset
 	f.DataLenPresent = true
-	f.Data = f.Data[:0]
+	// Data is nil from GetStreamFrame; allocated in getDataForWriting.
 
 	hasMoreData := s.popNewStreamFrameWithoutBuffer(f, maxBytes, sendWindow, v)
 	if len(f.Data) == 0 && !f.Fin {
@@ -356,18 +364,17 @@ func (s *sendStream) hasData() bool {
 }
 
 func (s *sendStream) getDataForWriting(f *wire.StreamFrame, maxBytes protocol.ByteCount) {
+	n := min(protocol.ByteCount(len(s.dataForWriting)), maxBytes)
+	f.Data = quicpool.GetBuffer(int(n))
+	copy(f.Data, s.dataForWriting[:n])
 	if protocol.ByteCount(len(s.dataForWriting)) <= maxBytes {
-		f.Data = f.Data[:len(s.dataForWriting)]
-		copy(f.Data, s.dataForWriting)
 		s.dataForWriting = nil
 		s.signalWrite()
-		return
-	}
-	f.Data = f.Data[:maxBytes]
-	copy(f.Data, s.dataForWriting)
-	s.dataForWriting = s.dataForWriting[maxBytes:]
-	if s.canBufferStreamFrame() {
-		s.signalWrite()
+	} else {
+		s.dataForWriting = s.dataForWriting[n:]
+		if s.canBufferStreamFrame() {
+			s.signalWrite()
+		}
 	}
 }
 

@@ -68,14 +68,6 @@ func TestParseStreamFrameRejectsOverflow(t *testing.T) {
 	require.EqualError(t, err, "stream data overflows maximum offset")
 }
 
-func TestParseStreamFrameRejectsLongFrames(t *testing.T) {
-	data := encodeVarInt(0x12345)                                                // stream ID
-	data = append(data, encodeVarInt(uint64(protocol.MaxPacketBufferSize)+1)...) // data length
-	data = append(data, make([]byte, protocol.MaxPacketBufferSize+1)...)
-	_, _, err := parseStreamFrame(data, 0x8^0x2, protocol.Version1)
-	require.Equal(t, io.EOF, err)
-}
-
 func TestParseStreamFrameRejectsFramesExceedingRemainingSize(t *testing.T) {
 	data := encodeVarInt(0x12345)           // stream ID
 	data = append(data, encodeVarInt(7)...) // data length
@@ -98,30 +90,30 @@ func TestParseStreamFrameErrorsOnEOFs(t *testing.T) {
 	}
 }
 
-func TestParseStreamUsesBufferForLongFrames(t *testing.T) {
+func TestParseStreamFrameWithData(t *testing.T) {
 	data := encodeVarInt(0x12345) // stream ID
-	data = append(data, bytes.Repeat([]byte{'f'}, protocol.MinStreamFrameBufferSize)...)
+	const dataLen = 128
+	data = append(data, bytes.Repeat([]byte{'f'}, dataLen)...)
 	frame, l, err := parseStreamFrame(data, 0x8, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, protocol.StreamID(0x12345), frame.StreamID)
-	require.Equal(t, bytes.Repeat([]byte{'f'}, protocol.MinStreamFrameBufferSize), frame.Data)
-	require.Equal(t, protocol.ByteCount(protocol.MinStreamFrameBufferSize), frame.DataLen())
+	require.Equal(t, bytes.Repeat([]byte{'f'}, dataLen), frame.Data)
+	require.Equal(t, protocol.ByteCount(dataLen), frame.DataLen())
 	require.False(t, frame.Fin)
-	require.True(t, frame.fromPool)
 	require.Equal(t, len(data), l)
 	require.NotPanics(t, frame.PutBack)
 }
 
-func TestParseStreamDoesNotUseBufferForShortFrames(t *testing.T) {
+func TestParseStreamFrameWithShortData(t *testing.T) {
 	data := encodeVarInt(0x12345) // stream ID
-	data = append(data, bytes.Repeat([]byte{'f'}, protocol.MinStreamFrameBufferSize-1)...)
+	const dataLen = 64
+	data = append(data, bytes.Repeat([]byte{'f'}, dataLen)...)
 	frame, l, err := parseStreamFrame(data, 0x8, protocol.Version1)
 	require.NoError(t, err)
 	require.Equal(t, protocol.StreamID(0x12345), frame.StreamID)
-	require.Equal(t, bytes.Repeat([]byte{'f'}, protocol.MinStreamFrameBufferSize-1), frame.Data)
-	require.Equal(t, protocol.ByteCount(protocol.MinStreamFrameBufferSize-1), frame.DataLen())
+	require.Equal(t, bytes.Repeat([]byte{'f'}, dataLen), frame.Data)
+	require.Equal(t, protocol.ByteCount(dataLen), frame.DataLen())
 	require.False(t, frame.Fin)
-	require.False(t, frame.fromPool)
 	require.Equal(t, len(data), l)
 	require.NotPanics(t, frame.PutBack)
 }
@@ -338,7 +330,6 @@ func TestStreamSplittingProducesCorrectLengthFramesWithoutDataLen(t *testing.T) 
 		require.Nil(t, frame)
 	}
 	for i := minFrameSize; i < size; i++ {
-		f.fromPool = false
 		f.Data = make([]byte, size)
 		frame, needsSplit := f.MaybeSplitOffFrame(i, protocol.Version1)
 		require.True(t, needsSplit)
@@ -362,7 +353,6 @@ func TestStreamSplittingProducesCorrectLengthFramesWithDataLen(t *testing.T) {
 	}
 	var frameOneByteTooSmallCounter int
 	for i := minFrameSize; i < size; i++ {
-		f.fromPool = false
 		f.Data = make([]byte, size)
 		newFrame, needsSplit := f.MaybeSplitOffFrame(i, protocol.Version1)
 		require.True(t, needsSplit)

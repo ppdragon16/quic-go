@@ -3,62 +3,48 @@ package wire
 import (
 	"sync"
 
-	"github.com/daeuniverse/quic-go/internal/protocol"
+	quicpool "github.com/daeuniverse/quic-go/pool"
 )
 
-var pool sync.Pool
+var streamFramePool sync.Pool
 var datagramFramePool sync.Pool
 
 func init() {
-	pool.New = func() interface{} {
-		return &StreamFrame{
-			Data:     make([]byte, 0, protocol.MaxPacketBufferSize),
-			fromPool: true,
-		}
-	}
-	datagramFramePool.New = func() interface{} {
-		return &DatagramFrame{
-			Data:     make([]byte, 0, MaxDatagramSize),
-			fromPool: true,
-		}
-	}
+	streamFramePool.New = func() any { return &StreamFrame{} }
+	datagramFramePool.New = func() any { return &DatagramFrame{} }
 }
 
+// GetStreamFrame returns a StreamFrame from the shared pool. The frame's
+// Data field is nil; use GetBuffer to allocate Data when needed.
+// Return the frame with putStreamFrame (or PutBack) once it has been acked.
 func GetStreamFrame() *StreamFrame {
-	f := pool.Get().(*StreamFrame)
-	f.Data = f.Data[:0]
+	f := streamFramePool.Get().(*StreamFrame)
+	f.Data = nil
 	return f
 }
 
 // GetDatagramFrame returns a DatagramFrame from the shared pool. The frame's
-// Data buffer has capacity MaxDatagramSize and must be re-sliced before use.
+// Data field is nil; use GetBuffer to allocate Data when needed.
 // Return the frame with PutDatagramFrame once it has been packed.
 func GetDatagramFrame() *DatagramFrame {
-	return datagramFramePool.Get().(*DatagramFrame)
+	f := datagramFramePool.Get().(*DatagramFrame)
+	f.Data = nil
+	return f
 }
 
-// PutDatagramFrame returns a pooled DatagramFrame (and its Data buffer) to
-// the pool. Frames not originating from the pool are ignored.
+// PutDatagramFrame returns a pooled DatagramFrame (and its Data buffer via
+// PutBuffer) to the pool.
 func PutDatagramFrame(f *DatagramFrame) {
-	if !f.fromPool {
-		return
+	if f.Data != nil {
+		quicpool.PutBuffer(f.Data)
 	}
-	if protocol.ByteCount(cap(f.Data)) > MaxDatagramSize {
-		// Oversized datagram buffer: skip pooling to avoid pinning a large
-		// allocation in the pool.
-		return
-	}
-	f.Data = f.Data[:0]
 	f.DataLenPresent = false
 	datagramFramePool.Put(f)
 }
 
 func putStreamFrame(f *StreamFrame) {
-	if !f.fromPool {
-		return
+	if f.Data != nil {
+		quicpool.PutBuffer(f.Data)
 	}
-	if protocol.ByteCount(cap(f.Data)) != protocol.MaxPacketBufferSize {
-		panic("wire.PutStreamFrame called with packet of wrong size!")
-	}
-	pool.Put(f)
+	streamFramePool.Put(f)
 }

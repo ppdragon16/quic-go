@@ -4,6 +4,7 @@ import (
 	"io"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
+	quicpool "github.com/daeuniverse/quic-go/pool"
 	"github.com/daeuniverse/quic-go/quicvarint"
 )
 
@@ -17,8 +18,6 @@ var MaxDatagramSize protocol.ByteCount = 1200
 type DatagramFrame struct {
 	DataLenPresent bool
 	Data           []byte
-
-	fromPool bool
 }
 
 func parseDatagramFrame(b []byte, typ uint64, _ protocol.Version) (*DatagramFrame, int, error) {
@@ -43,14 +42,10 @@ func parseDatagramFrame(b []byte, typ uint64, _ protocol.Version) (*DatagramFram
 	} else {
 		length = uint64(len(b))
 	}
-	if length > uint64(cap(f.Data)) {
-		// Oversized datagram (larger than the pool cap): allocate fresh.
-		// PutDatagramFrame will skip pooling it back.
-		f.Data = make([]byte, length)
-	} else {
-		f.Data = f.Data[:length]
+	if length > 0 {
+		f.Data = quicpool.GetBuffer(int(length))
+		copy(f.Data, b)
 	}
-	copy(f.Data, b)
 	return f, startLen - len(b) + int(length), nil
 }
 

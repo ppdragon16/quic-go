@@ -218,7 +218,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 			{Start: 9, End: protocol.MaxByteCount},
 		})
 		require.False(t, t1.WasCalled())
-		require.True(t, t2.WasCalled())
+		require.False(t, t2.WasCalled())
 	})
 
 	t.Run("case 4, for long frames", func(t *testing.T) {
@@ -262,7 +262,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 			{Start: 7, End: protocol.MaxByteCount},
 		})
 		require.False(t, t1.WasCalled())
-		require.True(t, t2.WasCalled())
+		require.False(t, t2.WasCalled())
 	})
 
 	t.Run("case 5, for long frames", func(t *testing.T) {
@@ -306,7 +306,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 			{Start: 9, End: protocol.MaxByteCount},
 		})
 		require.False(t, t1.WasCalled())
-		require.True(t, t2.WasCalled())
+		require.False(t, t2.WasCalled())
 	})
 
 	t.Run("case 6, for long frames", func(t *testing.T) {
@@ -447,7 +447,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.False(t, t1.WasCalled())
 		require.False(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	t.Run("case 10, for long frames", func(t *testing.T) {
@@ -502,7 +502,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.False(t, t1.WasCalled())
 		require.False(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	// ---xxxx----=====-------
@@ -610,7 +610,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.True(t, t1.WasCalled())
 		require.False(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	t.Run("case 14, for long frames", func(t *testing.T) {
@@ -969,7 +969,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.False(t, t1.WasCalled())
 		require.False(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	t.Run("case 27, for long frames", func(t *testing.T) {
@@ -1024,7 +1024,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.False(t, t1.WasCalled())
 		require.False(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	t.Run("case 28, for long frames", func(t *testing.T) {
@@ -1107,7 +1107,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.False(t, t1.WasCalled())
 		require.False(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	t.Run("case 30, for long frames", func(t *testing.T) {
@@ -1161,7 +1161,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.False(t, t1.WasCalled())
 		require.True(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	t.Run("case 31, for long frames", func(t *testing.T) {
@@ -1245,7 +1245,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		require.False(t, t1.WasCalled())
 		require.True(t, t2.WasCalled())
 		require.True(t, t3.WasCalled())
-		require.True(t, t4.WasCalled())
+		require.False(t, t4.WasCalled())
 	})
 
 	t.Run("case 33, for long frames", func(t *testing.T) {
@@ -1335,7 +1335,7 @@ func TestFrameSorterGapHandling(t *testing.T) {
 		})
 		require.True(t, t1.WasCalled())
 		require.False(t, t2.WasCalled())
-		require.True(t, t3.WasCalled())
+		require.False(t, t3.WasCalled())
 	})
 
 	t.Run("case 35, for long frames", func(t *testing.T) {
