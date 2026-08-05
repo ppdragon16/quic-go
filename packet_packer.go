@@ -640,7 +640,9 @@ func (p *packetPacker) composeNextPacket(
 	hasRetransmission := p.retransmissionQueue.HasAppData()
 
 	var hasAck bool
-	var pl payload
+	pl := payload{
+		frames: make([]ackhandler.Frame, 0, 4),
+	}
 	if ackAllowed {
 		if ack := p.acks.GetAckFrame(protocol.Encryption1RTT, now, !hasRetransmission && !hasData); ack != nil {
 			pl.ack = ack

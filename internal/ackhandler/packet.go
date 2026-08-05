@@ -32,22 +32,10 @@ var packetPool = sync.Pool{New: func() any { return &packet{} }}
 
 func getPacket() *packet {
 	p := packetPool.Get().(*packet)
-	p.PacketNumber = 0
-	p.StreamFrames = nil
-	p.Frames = nil
-	p.LargestAcked = 0
-	p.Length = 0
-	p.EncryptionLevel = protocol.EncryptionLevel(0)
-	p.SendTime = time.Time{}
-	p.IsPathMTUProbePacket = false
-	p.includedInBytesInFlight = false
-	p.declaredLost = false
-	p.skippedPacket = false
+	*p = packet{}
 	return p
 }
 
-// We currently only return Packets back into the pool when they're acknowledged (not when they're lost).
-// This simplifies the code, and gives the vast majority of the performance benefit we can gain from using the pool.
 func putPacket(p *packet) {
 	p.Frames = nil
 	p.StreamFrames = nil
