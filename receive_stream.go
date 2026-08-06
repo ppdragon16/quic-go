@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/daeuniverse/quic-go/internal/ackhandler"
@@ -49,8 +50,9 @@ type receiveStream struct {
 	cancelErr           *StreamError
 	closeForShutdownErr error
 
-	readChan chan struct{}
-	readOnce chan struct{} // cap: 1, to protect against concurrent use of Read
+	readChan      chan struct{}
+	readOnce      chan struct{} // cap: 1, to protect against concurrent use of Read
+	readWaiting   atomic.Bool   // set before blocking on readChan; signalRead is a no-op when false
 	deadline      time.Time
 	deadlineTimer *utils.Timer // lazily allocated, reused across Read calls
 
@@ -177,6 +179,7 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 				break
 			}
 
+			s.readWaiting.Store(true)
 			s.mutex.Unlock()
 			if deadline.IsZero() {
 				<-s.readChan
@@ -187,6 +190,7 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 					s.deadlineTimer.SetRead()
 				}
 			}
+			s.readWaiting.Store(false)
 			s.mutex.Lock()
 			if s.currentFrame == nil {
 				s.dequeueNextFrame()
@@ -380,8 +384,13 @@ func (s *receiveStream) closeForShutdown(err error) {
 	s.signalRead()
 }
 
-// signalRead performs a non-blocking send on the readChan
+// signalRead performs a non-blocking send on the readChan.
+// It only touches the channel if the reader is actually blocked (readWaiting set),
+// avoiding per-packet channel lock/unlock in the hot path.
 func (s *receiveStream) signalRead() {
+	if !s.readWaiting.Load() {
+		return
+	}
 	select {
 	case s.readChan <- struct{}{}:
 	default:
