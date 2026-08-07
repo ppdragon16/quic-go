@@ -483,7 +483,6 @@ func (s *connection) preSetup() {
 		uint64(s.config.MaxIncomingUniStreams),
 		s.perspective,
 		s.config.CapabilityCallback,
-		protocol.ByteCount(s.config.MaxReceiveStreamBufferSize),
 	)
 	s.framer = newFramer(s.connFlowController)
 	s.receivedPackets = make(chan receivedPacket, protocol.MaxConnUnprocessedPackets)

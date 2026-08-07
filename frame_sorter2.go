@@ -171,10 +171,6 @@ type frameSorter2 struct {
 
 	// queue is a ring buffer for fast-path sequential entries (offset == readPos).
 	queue fastQueue
-
-	// totalBytes tracks the total number of bytes currently stored in the sorter.
-	// It is incremented on successful Push and decremented on Pop or entry removal.
-	totalBytes int64
 }
 
 func newFrameSorter2() *frameSorter2 {
@@ -192,16 +188,10 @@ func (s *frameSorter2) Push(data []byte, offset protocol.ByteCount, frame *wire.
 	return err
 }
 
-func (s *frameSorter2) push(data []byte, offset protocol.ByteCount, frame *wire.StreamFrame) (err error) {
+func (s *frameSorter2) push(data []byte, offset protocol.ByteCount, frame *wire.StreamFrame) error {
 	if len(data) == 0 {
 		return errDuplicateStreamData
 	}
-
-	defer func() {
-		if err == nil {
-			s.totalBytes += int64(len(data))
-		}
-	}()
 
 	start := offset
 	end := offset + protocol.ByteCount(len(data))
@@ -493,7 +483,6 @@ func (s *frameSorter2) removeEntry(chunk *frameChunk, idx int) (freed bool) {
 		s.gapCount--
 	}
 
-	s.totalBytes -= int64(end - pos)
 	if chunk.remove(idx) {
 		s.unlinkChunk(chunk)
 		return true
@@ -575,7 +564,6 @@ func (s *frameSorter2) Pop() (protocol.ByteCount, []byte, *wire.StreamFrame) {
 	// Check ring buffer first.
 	if e, ok := s.queue.pop(s.readPos); ok {
 		s.readPos += protocol.ByteCount(len(e.Data))
-		s.totalBytes -= int64(len(e.Data))
 		return e.offset, e.Data, e.frame
 	}
 	if s.head == nil || s.head.len == 0 {
@@ -593,7 +581,6 @@ func (s *frameSorter2) Pop() (protocol.ByteCount, []byte, *wire.StreamFrame) {
 	copy(s.head.entries[:], s.head.entries[1:s.head.len])
 	s.head.len--
 	*s.head.entry(s.head.len) = frameEntry{}
-	s.totalBytes -= int64(len(entryData))
 	if s.head.len == 0 {
 		old := s.head
 		s.head = s.head.next
@@ -607,11 +594,6 @@ func (s *frameSorter2) Pop() (protocol.ByteCount, []byte, *wire.StreamFrame) {
 		s.tryMergeWithNext(s.head)
 	}
 	return offset, entryData, entryFrame
-}
-
-// TotalQueuedBytes returns the total number of bytes currently queued in the sorter.
-func (s *frameSorter2) TotalQueuedBytes() protocol.ByteCount {
-	return protocol.ByteCount(s.totalBytes)
 }
 
 // HasMoreData says if there is any more data queued at *any* offset.

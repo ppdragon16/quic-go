@@ -57,11 +57,6 @@ type receiveStream struct {
 	deadlineTimer *utils.Timer // lazily allocated, reused across Read calls
 
 	flowController flowcontrol.StreamFlowController
-
-	// maxReceiveStreamBufferSize is the per-stream backpressure threshold.
-	// When the frame sorter's TotalQueuedBytes exceeds this value, stream-level
-	// flow control window updates are suppressed. 0 = disabled.
-	maxReceiveStreamBufferSize protocol.ByteCount
 }
 
 var (
@@ -74,17 +69,15 @@ func newReceiveStream(
 	streamID protocol.StreamID,
 	sender streamSender,
 	flowController flowcontrol.StreamFlowController,
-	maxReceiveStreamBufferSize protocol.ByteCount,
 ) *receiveStream {
 	return &receiveStream{
-		streamID:                   streamID,
-		sender:                     sender,
-		flowController:             flowController,
-		frameQueue:                 newFrameSorter2(),
-		readChan:                   make(chan struct{}, 1),
-		readOnce:                   make(chan struct{}, 1),
-		finalOffset:                protocol.MaxByteCount,
-		maxReceiveStreamBufferSize: maxReceiveStreamBufferSize,
+		streamID:       streamID,
+		sender:         sender,
+		flowController: flowController,
+		frameQueue:     newFrameSorter2(),
+		readChan:       make(chan struct{}, 1),
+		readOnce:       make(chan struct{}, 1),
+		finalOffset:    protocol.MaxByteCount,
 	}
 }
 
@@ -219,11 +212,7 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 		// informed about the final byteOffset for this stream
 		if !s.cancelledRemotely {
 			hasStream, hasConn := s.flowController.AddBytesRead(protocol.ByteCount(m))
-			// Backpressure: suppress stream window updates when the frame sorter
-			// has accumulated too much unread data. Connection-level updates are
-			// NOT suppressed to avoid starving other streams on the same connection.
-			if hasStream && (s.maxReceiveStreamBufferSize == 0 ||
-				s.frameQueue.TotalQueuedBytes() <= s.maxReceiveStreamBufferSize) {
+			if hasStream {
 				s.queuedMaxStreamData = true
 				hasStreamWindowUpdate = true
 			}
