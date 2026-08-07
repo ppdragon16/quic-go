@@ -9,7 +9,7 @@ import (
 )
 
 type cryptoStream struct {
-	queue frameSorter
+	queue frameSorter2
 
 	highestOffset protocol.ByteCount
 	finished      bool
@@ -19,7 +19,7 @@ type cryptoStream struct {
 }
 
 func newCryptoStream() *cryptoStream {
-	return &cryptoStream{queue: *newFrameSorter()}
+	return &cryptoStream{queue: *newFrameSorter2()}
 }
 
 func (s *cryptoStream) HandleCryptoFrame(f *wire.CryptoFrame) error {
