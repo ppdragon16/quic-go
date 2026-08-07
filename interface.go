@@ -356,6 +356,13 @@ type Config struct {
 	// via SetCongestionControl. The connection calls SetRTTStatsProvider before
 	// any congestion control methods are invoked.
 	InitialCongestionControl congestion.CongestionControl
+	// MaxReceiveStreamBufferSize is the maximum amount of data queued per stream
+	// (in the frame sorter) before backpressure is applied. When exceeded,
+	// stream-level flow control window updates (MAX_STREAM_DATA) are suppressed
+	// until the queued data drops below this threshold. This prevents unbounded
+	// memory growth when the application reads slower than the network delivers.
+	// A value of 0 (default) disables this backpressure.
+	MaxReceiveStreamBufferSize uint64
 }
 
 // ClientHelloInfo contains information about an incoming connection attempt.

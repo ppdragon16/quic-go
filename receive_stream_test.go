@@ -41,7 +41,7 @@ func (r *readerWithTimeout) Read(p []byte) (n int, err error) {
 func TestReceiveStreamReadData(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
-	str := newReceiveStream(42, nil, mockFC)
+	str := newReceiveStream(42, nil, mockFC, 0)
 
 	// read an entire frame
 	now := time.Now()
@@ -101,7 +101,7 @@ func TestReceiveStreamBlockRead(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(2), false, gomock.Any())
 	mockFC.EXPECT().AddBytesRead(protocol.ByteCount(2))
@@ -121,7 +121,7 @@ func TestReceiveStreamBlockRead(t *testing.T) {
 func TestReceiveStreamReadOverlappingData(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
-	str := newReceiveStream(42, nil, mockFC)
+	str := newReceiveStream(42, nil, mockFC, 0)
 
 	// receive the same frame multiple times
 	now := time.Now()
@@ -167,7 +167,7 @@ func testReceiveStreamFlowControlUpdates(t *testing.T, hasStreamWindowUpdate, ha
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(streamID, mockSender, mockFC)
+	str := newReceiveStream(streamID, mockSender, mockFC, 0)
 
 	now := time.Now()
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(4), false, now)
@@ -203,7 +203,7 @@ func testReceiveStreamFlowControlUpdates(t *testing.T, hasStreamWindowUpdate, ha
 func TestReceiveStreamDeadlineInThePast(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
-	str := newReceiveStream(42, nil, mockFC)
+	str := newReceiveStream(42, nil, mockFC, 0)
 
 	// no data is read when the deadline is in the past
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(6), false, gomock.Any()).AnyTimes()
@@ -228,7 +228,7 @@ func TestReceiveStreamDeadlineInThePast(t *testing.T) {
 func TestReceiveStreamDeadlineRemoval(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
-	str := newReceiveStream(42, nil, mockFC)
+	str := newReceiveStream(42, nil, mockFC, 0)
 
 	deadline := scaleDuration(20 * time.Millisecond)
 	require.NoError(t, str.SetReadDeadline(time.Now().Add(deadline)))
@@ -265,7 +265,7 @@ func TestReceiveStreamDeadlineRemoval(t *testing.T) {
 func TestReceiveStreamDeadlineExtension(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
-	str := newReceiveStream(42, nil, mockFC)
+	str := newReceiveStream(42, nil, mockFC, 0)
 
 	deadline := scaleDuration(20 * time.Millisecond)
 	require.NoError(t, str.SetReadDeadline(time.Now().Add(deadline)))
@@ -294,7 +294,7 @@ func TestReceiveStreamEOFWithData(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 
 	now := time.Now()
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(4), true, now)
@@ -319,7 +319,7 @@ func TestReceiveStreamImmediateFINs(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(0), true, gomock.Any())
 	mockFC.EXPECT().AddBytesRead(protocol.ByteCount(0))
 	require.NoError(t, str.handleStreamFrame(&wire.StreamFrame{Fin: true}, time.Now()))
@@ -333,7 +333,7 @@ func TestReceiveStreamCloseForShutdown(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 	strWithTimeout := &readerWithTimeout{Reader: str, Timeout: time.Second}
 
 	// Test immediate return of reads
@@ -380,7 +380,7 @@ func TestReceiveStreamCancellation(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 	strWithTimeout := &readerWithTimeout{Reader: str, Timeout: time.Second}
 
 	mockSender.EXPECT().onHasStreamControlFrame(str.StreamID(), gomock.Any())
@@ -452,7 +452,7 @@ func TestReceiveStreamCancelReadAfterFINReceived(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(6), true, gomock.Any())
 	mockSender.EXPECT().onStreamCompleted(protocol.StreamID(42))
@@ -477,7 +477,7 @@ func TestReceiveStreamCancelReadAfterFINRead(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(6), true, gomock.Any())
 	mockFC.EXPECT().AddBytesRead(protocol.ByteCount(6))
@@ -503,7 +503,7 @@ func TestReceiveStreamReset(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 	strWithTimeout := &readerWithTimeout{Reader: str, Timeout: time.Second}
 
 	errChan := make(chan error, 1)
@@ -562,7 +562,7 @@ func TestReceiveStreamResetAfterFINRead(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(6), true, gomock.Any())
 	mockSender.EXPECT().onStreamCompleted(protocol.StreamID(42))
 	require.NoError(t, str.handleStreamFrame(
@@ -601,7 +601,7 @@ func TestReceiveStreamConcurrentReads(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	mockFC := mocks.NewMockStreamFlowController(mockCtrl)
 	mockSender := NewMockStreamSender(mockCtrl)
-	str := newReceiveStream(42, mockSender, mockFC)
+	str := newReceiveStream(42, mockSender, mockFC, 0)
 
 	mockFC.EXPECT().UpdateHighestReceived(protocol.ByteCount(6), gomock.Any(), gomock.Any()).AnyTimes()
 	var bytesRead protocol.ByteCount

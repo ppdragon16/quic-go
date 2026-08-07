@@ -118,7 +118,7 @@ func newStream(
 			sender.onHasStreamControlFrame(streamID, s)
 		},
 	}
-	s.receiveStream = *newReceiveStream(streamID, senderForReceiveStream, flowController)
+	s.receiveStream = *newReceiveStream(streamID, senderForReceiveStream, flowController, 0)
 	return s
 }
 

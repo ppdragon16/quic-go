@@ -65,6 +65,8 @@ type streamsMap struct {
 	queueControlFrame func(wire.Frame)
 	newFlowController func(protocol.StreamID) flowcontrol.StreamFlowController
 
+	maxReceiveStreamBufferSize protocol.ByteCount
+
 	mutex               sync.Mutex
 	outgoingBidiStreams *outgoingStreamsMap[streamI]
 	outgoingUniStreams  *outgoingStreamsMap[sendStreamI]
@@ -85,16 +87,18 @@ func newStreamsMap(
 	maxIncomingUniStreams uint64,
 	perspective protocol.Perspective,
 	capabilityCallback func(n int64),
+	maxReceiveStreamBufferSize protocol.ByteCount,
 ) *streamsMap {
 	m := &streamsMap{
-		ctx:                    ctx,
-		perspective:            perspective,
-		queueControlFrame:      queueControlFrame,
-		newFlowController:      newFlowController,
-		maxIncomingBidiStreams: maxIncomingBidiStreams,
-		maxIncomingUniStreams:  maxIncomingUniStreams,
-		sender:                 sender,
-		capabilityCallback:     capabilityCallback,
+		ctx:                         ctx,
+		perspective:                 perspective,
+		queueControlFrame:           queueControlFrame,
+		newFlowController:           newFlowController,
+		maxIncomingBidiStreams:      maxIncomingBidiStreams,
+		maxIncomingUniStreams:       maxIncomingUniStreams,
+		sender:                      sender,
+		capabilityCallback:          capabilityCallback,
+		maxReceiveStreamBufferSize:  maxReceiveStreamBufferSize,
 	}
 	m.initMaps()
 	return m
@@ -132,7 +136,7 @@ func (m *streamsMap) initMaps() {
 		protocol.StreamTypeUni,
 		func(num protocol.StreamNum) receiveStreamI {
 			id := num.StreamID(protocol.StreamTypeUni, m.perspective.Opposite())
-			return newReceiveStream(id, m.sender, m.newFlowController(id))
+			return newReceiveStream(id, m.sender, m.newFlowController(id), m.maxReceiveStreamBufferSize)
 		},
 		m.maxIncomingUniStreams,
 		m.queueControlFrame,
