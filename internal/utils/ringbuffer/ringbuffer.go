@@ -13,6 +13,24 @@ func (r *RingBuffer[T]) Init(size int) {
 	r.ring = make([]T, size)
 }
 
+// Cap returns the current capacity of the ring buffer.
+func (r *RingBuffer[T]) Cap() int {
+	return len(r.ring)
+}
+
+// GrowTo grows the ring buffer to at least newCap elements.
+// Existing elements are preserved.
+func (r *RingBuffer[T]) GrowTo(newCap int) {
+	if newCap <= len(r.ring) {
+		return
+	}
+	oldRing := r.ring
+	r.ring = make([]T, newCap)
+	headLen := copy(r.ring, oldRing[r.headPos:])
+	copy(r.ring[headLen:], oldRing[:r.headPos])
+	r.headPos, r.tailPos, r.full = 0, len(oldRing), false
+}
+
 // Len returns the number of elements in the ring buffer.
 func (r *RingBuffer[T]) Len() int {
 	if r.full {

@@ -11,8 +11,18 @@ import (
 )
 
 const (
-	maxDatagramSendQueueLen = 32
-	maxDatagramRcvQueueLen  = 128
+	// Initial and maximum send queue capacities. The queue starts at the
+	// initial size and grows once to the maximum on first overflow, avoiding
+	// both wasteful pre-allocation for idle connections and head-of-line
+	// blocking under load (e.g. when the pacer or cwnd throttles sending
+	// during concurrent TCP traffic).
+	initDatagramSendQueueLen = 32
+	maxDatagramSendQueueLen  = 128
+	// Initial and maximum receive queue capacities. The queue starts at the
+	// initial size and grows once to the maximum on first overflow, absorbing
+	// bursts (game server explosions, mass player events) without silent drops.
+	initDatagramRcvQueueLen = 128
+	maxDatagramRcvQueueLen  = 512
 	// maxDatagramBufPoolLen bounds how many receive buffers are retained for
 	// reuse. 256 x 1452B = ~372KB worst-case steady-state retention, which
 	// caps the pool's footprint while still absorbing line-rate bursts.
@@ -91,29 +101,41 @@ func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 		sent:    make(chan struct{}, 1),
 		closed:  make(chan struct{}),
 		logger:  logger,
+		sendQueue: func() ringbuffer.RingBuffer[*wire.DatagramFrame] {
+			var rb ringbuffer.RingBuffer[*wire.DatagramFrame]
+			rb.Init(initDatagramSendQueueLen)
+			return rb
+		}(),
 		// Use a ring buffer for the receive queue so steady-state enqueue
 		// never triggers slice growth allocations.
 		rcvQueue: func() ringbuffer.RingBuffer[[]byte] {
 			var rb ringbuffer.RingBuffer[[]byte]
-			rb.Init(maxDatagramRcvQueueLen)
+			rb.Init(initDatagramRcvQueueLen)
 			return rb
 		}(),
 	}
 }
 
 // Add queues a new DATAGRAM frame for sending.
-// Up to 32 DATAGRAM frames will be queued.
-// Once that limit is reached, Add blocks until the queue size has reduced.
+// The send queue starts at initDatagramSendQueueLen entries and grows once
+// to maxDatagramSendQueueLen on first overflow. Once the maximum is reached,
+// Add blocks until space is available.
 func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 	h.sendMx.Lock()
 
 	for {
-		if h.sendQueue.Len() < maxDatagramSendQueueLen {
+		if h.sendQueue.Len() < h.sendQueue.Cap() {
 			h.sendQueue.PushBack(f)
 			h.sendMx.Unlock()
 			h.hasData()
 			return nil
 		}
+		// Queue at current capacity — try one-time expansion.
+		if h.sendQueue.Cap() < maxDatagramSendQueueLen {
+			h.sendQueue.GrowTo(maxDatagramSendQueueLen)
+			continue
+		}
+		// Already at absolute maximum — block.
 		select {
 		case <-h.sent: // drain the queue so we don't loop immediately
 		default:
@@ -153,6 +175,9 @@ func (h *datagramQueue) Pop() {
 }
 
 // HandleDatagramFrame handles a received DATAGRAM frame.
+// The receive queue starts at initDatagramRcvQueueLen entries and grows once
+// to maxDatagramRcvQueueLen on first overflow. Once the maximum is reached,
+// incoming datagrams are silently dropped.
 func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 	buf := datagramBufPool.Get()
 	if cap(buf) < len(f.Data) {
@@ -167,7 +192,16 @@ func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
 	wire.PutDatagramFrame(f)
 	var queued bool
 	h.rcvMx.Lock()
-	if h.rcvQueue.Len() < maxDatagramRcvQueueLen {
+	if h.rcvQueue.Len() < h.rcvQueue.Cap() {
+		h.rcvQueue.PushBack(buf)
+		queued = true
+		select {
+		case h.rcvd <- struct{}{}:
+		default:
+		}
+	} else if h.rcvQueue.Cap() < maxDatagramRcvQueueLen {
+		// Queue at current capacity — one-time expansion.
+		h.rcvQueue.GrowTo(maxDatagramRcvQueueLen)
 		h.rcvQueue.PushBack(buf)
 		queued = true
 		select {
