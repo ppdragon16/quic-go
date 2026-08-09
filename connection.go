@@ -1617,6 +1617,9 @@ func (s *connection) destroyImpl(e error) {
 	s.closeOnce.Do(func() {
 		if nerr, ok := e.(net.Error); ok && nerr.Timeout() {
 			s.logger.Errorf("Destroying connection: %s", e)
+		} else if errors.Is(e, ErrTransportClosed) {
+			// Transport closing is normal cleanup, not an error condition.
+			s.logger.Infof("Destroying connection as transport closed")
 		} else {
 			s.logger.Errorf("Destroying connection with error: %s", e)
 		}
