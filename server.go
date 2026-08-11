@@ -2,12 +2,13 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/internal/handshake"
 	"github.com/daeuniverse/quic-go/internal/protocol"
@@ -64,7 +65,7 @@ type baseServer struct {
 	disableVersionNegotiation bool
 	acceptEarlyConns          bool
 
-	tlsConf *tls.Config
+	tlsConf *utls.Config
 	config  *Config
 
 	conn rawConn
@@ -98,7 +99,7 @@ type baseServer struct {
 		ConnectionIDGenerator,
 		*statelessResetter,
 		*Config,
-		*tls.Config,
+		*utls.Config,
 		*handshake.TokenGenerator,
 		bool, /* client address validated by an address validation token */
 		*logging.ConnectionTracer,
@@ -187,7 +188,7 @@ func (l *EarlyListener) Addr() net.Addr {
 
 // ListenAddr creates a QUIC server listening on a given address.
 // See Listen for more details.
-func ListenAddr(addr string, tlsConf *tls.Config, config *Config) (*Listener, error) {
+func ListenAddr(addr string, tlsConf *utls.Config, config *Config) (*Listener, error) {
 	conn, err := listenUDP(addr)
 	if err != nil {
 		return nil, err
@@ -200,7 +201,7 @@ func ListenAddr(addr string, tlsConf *tls.Config, config *Config) (*Listener, er
 }
 
 // ListenAddrEarly works like ListenAddr, but it returns connections before the handshake completes.
-func ListenAddrEarly(addr string, tlsConf *tls.Config, config *Config) (*EarlyListener, error) {
+func ListenAddrEarly(addr string, tlsConf *utls.Config, config *Config) (*EarlyListener, error) {
 	conn, err := listenUDP(addr)
 	if err != nil {
 		return nil, err
@@ -226,7 +227,7 @@ func listenUDP(addr string) (*net.UDPConn, error) {
 // will be used instead of ReadFrom and WriteTo to read/write packets.
 // A single net.PacketConn can only be used for a single call to Listen.
 //
-// The tls.Config must not be nil and must contain a certificate configuration.
+// The utls.Config must not be nil and must contain a certificate configuration.
 // Furthermore, it must define an application control (using NextProtos).
 // The quic.Config may be nil, in that case the default values will be used.
 //
@@ -234,13 +235,13 @@ func listenUDP(addr string) (*net.UDPConn, error) {
 // which offers configuration options for a more fine-grained control of the connection establishment,
 // including reusing the underlying UDP socket for outgoing QUIC connections.
 // When closing a listener created with Listen, all established QUIC connections will be closed immediately.
-func Listen(conn net.PacketConn, tlsConf *tls.Config, config *Config) (*Listener, error) {
+func Listen(conn net.PacketConn, tlsConf *utls.Config, config *Config) (*Listener, error) {
 	tr := &Transport{Conn: conn, isSingleUse: true}
 	return tr.Listen(tlsConf, config)
 }
 
 // ListenEarly works like Listen, but it returns connections before the handshake completes.
-func ListenEarly(conn net.PacketConn, tlsConf *tls.Config, config *Config) (*EarlyListener, error) {
+func ListenEarly(conn net.PacketConn, tlsConf *utls.Config, config *Config) (*EarlyListener, error) {
 	tr := &Transport{Conn: conn, isSingleUse: true}
 	return tr.ListenEarly(tlsConf, config)
 }
@@ -251,7 +252,7 @@ func newServer(
 	connIDGenerator ConnectionIDGenerator,
 	statelessResetter *statelessResetter,
 	connContext func(context.Context) context.Context,
-	tlsConf *tls.Config,
+	tlsConf *utls.Config,
 	config *Config,
 	tracer *logging.Tracer,
 	onClose func(),

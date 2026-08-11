@@ -3,13 +3,14 @@ package quic
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/utils"
@@ -115,7 +116,7 @@ type Transport struct {
 	// The context is closed when the connection is closed, or when the handshake fails for any reason.
 	// The context returned from the callback is used to derive every other context used during the
 	// lifetime of the connection:
-	// * the context passed to crypto/tls (and used on the tls.ClientHelloInfo)
+	// * the context passed to crypto/tls (and used on the utls.ClientHelloInfo)
 	// * the context used in Config.Tracer
 	// * the context returned from Connection.Context
 	// * the context returned from SendStream.Context
@@ -161,7 +162,7 @@ type Transport struct {
 // Listen starts listening for incoming QUIC connections.
 // There can only be a single listener on any net.PacketConn.
 // Listen may only be called again after the current Listener was closed.
-func (t *Transport) Listen(tlsConf *tls.Config, conf *Config) (*Listener, error) {
+func (t *Transport) Listen(tlsConf *utls.Config, conf *Config) (*Listener, error) {
 	s, err := t.createServer(tlsConf, conf, false)
 	if err != nil {
 		return nil, err
@@ -172,7 +173,7 @@ func (t *Transport) Listen(tlsConf *tls.Config, conf *Config) (*Listener, error)
 // ListenEarly starts listening for incoming QUIC connections.
 // There can only be a single listener on any net.PacketConn.
 // Listen may only be called again after the current Listener was closed.
-func (t *Transport) ListenEarly(tlsConf *tls.Config, conf *Config) (*EarlyListener, error) {
+func (t *Transport) ListenEarly(tlsConf *utls.Config, conf *Config) (*EarlyListener, error) {
 	s, err := t.createServer(tlsConf, conf, true)
 	if err != nil {
 		return nil, err
@@ -180,9 +181,9 @@ func (t *Transport) ListenEarly(tlsConf *tls.Config, conf *Config) (*EarlyListen
 	return &EarlyListener{baseServer: s}, nil
 }
 
-func (t *Transport) createServer(tlsConf *tls.Config, conf *Config, allow0RTT bool) (*baseServer, error) {
+func (t *Transport) createServer(tlsConf *utls.Config, conf *Config, allow0RTT bool) (*baseServer, error) {
 	if tlsConf == nil {
-		return nil, errors.New("quic: tls.Config not set")
+		return nil, errors.New("quic: utls.Config not set")
 	}
 	if err := validateConfig(conf); err != nil {
 		return nil, err
@@ -226,16 +227,16 @@ func (t *Transport) createServer(tlsConf *tls.Config, conf *Config, allow0RTT bo
 }
 
 // Dial dials a new connection to a remote host (not using 0-RTT).
-func (t *Transport) Dial(ctx context.Context, addr net.Addr, tlsConf *tls.Config, conf *Config) (Connection, error) {
+func (t *Transport) Dial(ctx context.Context, addr net.Addr, tlsConf *utls.Config, conf *Config) (Connection, error) {
 	return t.dial(ctx, addr, "", tlsConf, conf, false)
 }
 
 // DialEarly dials a new connection, attempting to use 0-RTT if possible.
-func (t *Transport) DialEarly(ctx context.Context, addr net.Addr, tlsConf *tls.Config, conf *Config) (EarlyConnection, error) {
+func (t *Transport) DialEarly(ctx context.Context, addr net.Addr, tlsConf *utls.Config, conf *Config) (EarlyConnection, error) {
 	return t.dial(ctx, addr, "", tlsConf, conf, true)
 }
 
-func (t *Transport) dial(ctx context.Context, addr net.Addr, host string, tlsConf *tls.Config, conf *Config, use0RTT bool) (EarlyConnection, error) {
+func (t *Transport) dial(ctx context.Context, addr net.Addr, host string, tlsConf *utls.Config, conf *Config, use0RTT bool) (EarlyConnection, error) {
 	if err := t.init(t.isSingleUse); err != nil {
 		return nil, err
 	}
@@ -259,7 +260,7 @@ func (t *Transport) dial(ctx context.Context, addr net.Addr, host string, tlsCon
 func (t *Transport) doDial(
 	ctx context.Context,
 	sendConn sendConn,
-	tlsConf *tls.Config,
+	tlsConf *utls.Config,
 	config *Config,
 	initialPacketNumber protocol.PacketNumber,
 	hasNegotiatedVersion bool,
@@ -693,7 +694,7 @@ func (t *Transport) ReadNonQUICPacket(ctx context.Context, b []byte) (int, net.A
 	}
 }
 
-func setTLSConfigServerName(tlsConf *tls.Config, addr net.Addr, host string) {
+func setTLSConfigServerName(tlsConf *utls.Config, addr net.Addr, host string) {
 	// If no ServerName is set, infer the ServerName from the host we're connecting to.
 	if tlsConf.ServerName != "" {
 		return

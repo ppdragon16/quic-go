@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"log"
 	"net"
+
+	utls "github.com/refraction-networking/utls"
 
 	fuzzhandshake "github.com/daeuniverse/quic-go/fuzzing/handshake"
 	"github.com/daeuniverse/quic-go/fuzzing/internal/helper"
@@ -21,12 +22,12 @@ func main() {
 	client := handshake.NewCryptoSetupClient(
 		protocol.ConnectionID{},
 		&wire.TransportParameters{ActiveConnectionIDLimit: 2},
-		&tls.Config{
-			MinVersion:         tls.VersionTLS13,
+		&utls.Config{
+			MinVersion:         utls.VersionTLS13,
 			ServerName:         "localhost",
 			NextProtos:         []string{alpn},
 			RootCAs:            testdata.GetRootCA(),
-			ClientSessionCache: tls.NewLRUClientSessionCache(1),
+			ClientSessionCache: utls.NewLRUClientSessionCache(1),
 		},
 		false,
 		&utils.RTTStats{},

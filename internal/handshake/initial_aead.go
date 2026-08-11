@@ -2,7 +2,8 @@ package handshake
 
 import (
 	"crypto"
-	"crypto/tls"
+
+	utls "github.com/refraction-networking/utls"
 
 	"golang.org/x/crypto/hkdf"
 
@@ -28,7 +29,7 @@ func getSalt(v protocol.Version) []byte {
 	return quicSaltV1
 }
 
-var initialSuite = getCipherSuite(tls.TLS_AES_128_GCM_SHA256)
+var initialSuite = getCipherSuite(utls.TLS_AES_128_GCM_SHA256)
 
 // NewInitialAEAD creates a new AEAD for Initial encryption / decryption.
 func NewInitialAEAD(connID protocol.ConnectionID, pers protocol.Perspective, v protocol.Version) (LongHeaderSealer, LongHeaderOpener) {

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,6 +10,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"golang.org/x/sync/errgroup"
 
@@ -25,7 +26,7 @@ import (
 
 var errUnsupported = errors.New("unsupported test case")
 
-var tlsConf *tls.Config
+var tlsConf *utls.Config
 
 func main() {
 	logFile, err := os.Create("/logs/log.txt")
@@ -45,7 +46,7 @@ func main() {
 		defer keyLog.Close()
 	}
 
-	tlsConf = &tls.Config{
+	tlsConf = &utls.Config{
 		InsecureSkipVerify: true,
 		KeyLogWriter:       keyLog,
 	}
@@ -86,7 +87,7 @@ func runTestcase(testcase string) error {
 	case "keyupdate":
 		handshake.FirstKeyUpdateInterval = 100
 	case "chacha20":
-		reset := qtls.SetCipherSuite(tls.TLS_CHACHA20_POLY1305_SHA256)
+		reset := qtls.SetCipherSuite(utls.TLS_CHACHA20_POLY1305_SHA256)
 		defer reset()
 	case "multiconnect":
 		return runMultiConnectTest(r, urls)
@@ -131,16 +132,16 @@ func runMultiConnectTest(r *http09.RoundTripper, urls []string) error {
 }
 
 type sessionCache struct {
-	tls.ClientSessionCache
+	utls.ClientSessionCache
 	put chan<- struct{}
 }
 
-func newSessionCache(c tls.ClientSessionCache) (tls.ClientSessionCache, <-chan struct{}) {
+func newSessionCache(c utls.ClientSessionCache) (utls.ClientSessionCache, <-chan struct{}) {
 	put := make(chan struct{}, 100)
 	return &sessionCache{ClientSessionCache: c, put: put}, put
 }
 
-func (c *sessionCache) Put(key string, cs *tls.ClientSessionState) {
+func (c *sessionCache) Put(key string, cs *utls.ClientSessionState) {
 	c.ClientSessionCache.Put(key, cs)
 	c.put <- struct{}{}
 }
@@ -151,7 +152,7 @@ func runResumptionTest(r *http09.RoundTripper, urls []string, use0RTT bool) erro
 	}
 
 	var put <-chan struct{}
-	tlsConf.ClientSessionCache, put = newSessionCache(tls.NewLRUClientSessionCache(1))
+	tlsConf.ClientSessionCache, put = newSessionCache(utls.NewLRUClientSessionCache(1))
 
 	// do the first transfer
 	if err := downloadFiles(r, urls[:1], false); err != nil {

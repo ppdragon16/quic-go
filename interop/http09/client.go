@@ -2,7 +2,6 @@ package http09
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"log"
@@ -10,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	utls "github.com/refraction-networking/utls"
 
 	"golang.org/x/net/idna"
 
@@ -24,7 +25,7 @@ const MethodGet0RTT = "GET_0RTT"
 type RoundTripper struct {
 	mutex sync.Mutex
 
-	TLSClientConfig *tls.Config
+	TLSClientConfig *utls.Config
 	QuicConfig      *quic.Config
 
 	clients map[string]*client
@@ -48,14 +49,14 @@ func (r *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 	}
 	c, ok := r.clients[hostname]
 	if !ok {
-		tlsConf := &tls.Config{}
+		utlsConf := &utls.Config{}
 		if r.TLSClientConfig != nil {
-			tlsConf = r.TLSClientConfig.Clone()
+			utlsConf = r.TLSClientConfig.Clone()
 		}
-		tlsConf.NextProtos = []string{NextProto}
+		utlsConf.NextProtos = []string{NextProto}
 		c = &client{
 			hostname: hostname,
-			tlsConf:  tlsConf,
+			utlsConf: utlsConf,
 			quicConf: r.QuicConfig,
 		}
 		r.clients[hostname] = c
@@ -80,7 +81,7 @@ func (r *RoundTripper) Close() error {
 
 type client struct {
 	hostname string
-	tlsConf  *tls.Config
+	utlsConf *utls.Config
 	quicConf *quic.Config
 
 	once    sync.Once
@@ -90,7 +91,7 @@ type client struct {
 
 func (c *client) RoundTrip(req *http.Request) (*http.Response, error) {
 	c.once.Do(func() {
-		c.conn, c.dialErr = quic.DialAddrEarly(context.Background(), c.hostname, c.tlsConf, c.quicConf)
+		c.conn, c.dialErr = quic.DialAddrEarly(context.Background(), c.hostname, c.utlsConf, c.quicConf)
 	})
 	if c.dialErr != nil {
 		return nil, c.dialErr

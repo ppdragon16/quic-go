@@ -5,12 +5,13 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"math/big"
 	"net"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 const ALPN = "quic-go integration tests"
@@ -68,7 +69,7 @@ func GenerateLeafCert(ca *x509.Certificate, caPriv crypto.PrivateKey) (*x509.Cer
 
 // GenerateTLSConfigWithLongCertChain generates a tls.Config that uses a long certificate chain.
 // The Root CA used is the same as for the config returned from getTLSConfig().
-func GenerateTLSConfigWithLongCertChain(ca *x509.Certificate, caPrivateKey crypto.PrivateKey) (*tls.Config, error) {
+func GenerateTLSConfigWithLongCertChain(ca *x509.Certificate, caPrivateKey crypto.PrivateKey) (*utls.Config, error) {
 	const chainLen = 7
 	certTempl := &x509.Certificate{
 		SerialNumber:          big.NewInt(2019),
@@ -112,8 +113,8 @@ func GenerateTLSConfigWithLongCertChain(ca *x509.Certificate, caPrivateKey crypt
 	}
 	rawCerts[0] = leafCert.Raw
 
-	return &tls.Config{
-		Certificates: []tls.Certificate{{
+	return &utls.Config{
+		Certificates: []utls.Certificate{{
 			Certificate: rawCerts,
 			PrivateKey:  leafPrivateKey,
 		}},

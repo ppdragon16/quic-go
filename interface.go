@@ -2,11 +2,12 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"net"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/congestion"
 	"github.com/daeuniverse/quic-go/internal/handshake"
@@ -64,7 +65,7 @@ type ConnectionTracingID uint64
 type connTracingCtxKey struct{}
 
 // QUICVersionContextKey can be used to find out the QUIC version of a TLS handshake from the
-// context returned by tls.Config.ClientHelloInfo.Context.
+// context returned by utls.Config.ClientHelloInfo.Context.
 var QUICVersionContextKey = handshake.QUICVersionContextKey
 
 // Stream is the interface implemented by QUIC streams
@@ -290,7 +291,7 @@ type Config struct {
 	MaxIdleTimeout time.Duration
 	// The TokenStore stores tokens received from the server.
 	// Tokens are used to skip address validation on future connection attempts.
-	// The key used to store tokens is the ServerName from the tls.Config, if set
+	// The key used to store tokens is the ServerName from the utls.Config, if set
 	// otherwise the token is associated with the server's IP address.
 	TokenStore TokenStore
 	// InitialStreamReceiveWindow is the initial size of the stream-level flow control window for receiving data.
@@ -371,8 +372,8 @@ type ClientHelloInfo struct {
 
 // ConnectionState records basic details about a QUIC connection
 type ConnectionState struct {
-	// TLS contains information about the TLS connection state, incl. the tls.ConnectionState.
-	TLS tls.ConnectionState
+	// TLS contains information about the TLS connection state, incl. the utls.ConnectionState.
+	TLS utls.ConnectionState
 	// SupportsDatagrams indicates whether the peer advertised support for QUIC datagrams (RFC 9221).
 	// When true, datagrams can be sent using the Connection's SendDatagram method.
 	// This is a unilateral declaration by the peer - receiving datagrams is only possible if

@@ -1,18 +1,19 @@
 package qtls
 
 import (
-	"crypto/tls"
 	"fmt"
 	"unsafe"
+
+	utls "github.com/refraction-networking/utls"
 )
 
-//go:linkname cipherSuitesTLS13 crypto/tls.cipherSuitesTLS13
+//go:linkname cipherSuitesTLS13 crypto/utls.cipherSuitesTLS13
 var cipherSuitesTLS13 []unsafe.Pointer
 
-//go:linkname defaultCipherSuitesTLS13 crypto/tls.defaultCipherSuitesTLS13
+//go:linkname defaultCipherSuitesTLS13 crypto/utls.defaultCipherSuitesTLS13
 var defaultCipherSuitesTLS13 []uint16
 
-//go:linkname defaultCipherSuitesTLS13NoAES crypto/tls.defaultCipherSuitesTLS13NoAES
+//go:linkname defaultCipherSuitesTLS13NoAES crypto/utls.defaultCipherSuitesTLS13NoAES
 var defaultCipherSuitesTLS13NoAES []uint16
 
 var cipherSuitesModified bool
@@ -31,11 +32,11 @@ func SetCipherSuite(id uint16) (reset func()) {
 	origDefaultCipherSuitesTLS13NoAES := append([]uint16{}, defaultCipherSuitesTLS13NoAES...)
 	// The order is given by the order of the slice elements in cipherSuitesTLS13 in qtls.
 	switch id {
-	case tls.TLS_AES_128_GCM_SHA256:
+	case utls.TLS_AES_128_GCM_SHA256:
 		cipherSuitesTLS13 = cipherSuitesTLS13[:1]
-	case tls.TLS_CHACHA20_POLY1305_SHA256:
+	case utls.TLS_CHACHA20_POLY1305_SHA256:
 		cipherSuitesTLS13 = cipherSuitesTLS13[1:2]
-	case tls.TLS_AES_256_GCM_SHA384:
+	case utls.TLS_AES_256_GCM_SHA384:
 		cipherSuitesTLS13 = cipherSuitesTLS13[2:]
 	default:
 		panic(fmt.Sprintf("unexpected cipher suite: %d", id))

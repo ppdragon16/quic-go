@@ -3,10 +3,11 @@ package handshake
 import (
 	"crypto"
 	"crypto/cipher"
-	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/qerr"
@@ -150,9 +151,9 @@ func (a *updatableAEAD) setAEADParameters(aead cipher.AEAD, suite *cipherSuite) 
 	a.aeadOverhead = aead.Overhead()
 	a.suite = suite
 	switch suite.ID {
-	case tls.TLS_AES_128_GCM_SHA256, tls.TLS_AES_256_GCM_SHA384:
+	case utls.TLS_AES_128_GCM_SHA256, utls.TLS_AES_256_GCM_SHA384:
 		a.invalidPacketLimit = protocol.InvalidPacketLimitAES
-	case tls.TLS_CHACHA20_POLY1305_SHA256:
+	case utls.TLS_CHACHA20_POLY1305_SHA256:
 		a.invalidPacketLimit = protocol.InvalidPacketLimitChaCha
 	default:
 		panic(fmt.Sprintf("unknown cipher suite %d", suite.ID))

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"crypto/tls"
 	"crypto/x509"
 	"flag"
 	"io"
@@ -10,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"sync"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go"
 	"github.com/daeuniverse/quic-go/http3"
@@ -41,7 +42,7 @@ func main() {
 	testdata.AddRootCA(pool)
 
 	roundTripper := &http3.Transport{
-		TLSClientConfig: &tls.Config{
+		TLSClientConfig: &utls.Config{
 			RootCAs:            pool,
 			InsecureSkipVerify: *insecure,
 			KeyLogWriter:       keyLog,

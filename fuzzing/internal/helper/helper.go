@@ -4,7 +4,6 @@ import (
 	"crypto"
 	"crypto/rand"
 	"crypto/sha1"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
@@ -12,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 // NthBit gets the n-th bit of a byte (counting starts at 0).
@@ -44,7 +45,7 @@ func WriteCorpusFileWithPrefix(path string, data []byte, n int) error {
 
 // GenerateCertificate generates a self-signed certificate.
 // It returns the certificate and a x509.CertPool containing that certificate.
-func GenerateCertificate(priv crypto.Signer) (*tls.Certificate, *x509.CertPool, error) {
+func GenerateCertificate(priv crypto.Signer) (*utls.Certificate, *x509.CertPool, error) {
 	template := x509.Certificate{
 		SerialNumber:          big.NewInt(1),
 		Subject:               pkix.Name{Organization: []string{"quic-go fuzzer"}},
@@ -65,7 +66,7 @@ func GenerateCertificate(priv crypto.Signer) (*tls.Certificate, *x509.CertPool, 
 	}
 	certPool := x509.NewCertPool()
 	certPool.AddCert(cert)
-	return &tls.Certificate{
+	return &utls.Certificate{
 		Certificate: [][]byte{derBytes},
 		PrivateKey:  priv,
 	}, certPool, nil

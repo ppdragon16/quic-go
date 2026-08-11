@@ -7,6 +7,8 @@ import (
 	"net/textproto"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
+
 	"github.com/daeuniverse/quic-go"
 )
 
@@ -98,8 +100,17 @@ func traceTLSHandshakeStart(trace *httptrace.ClientTrace) {
 	}
 }
 
-func traceTLSHandshakeDone(trace *httptrace.ClientTrace, state tls.ConnectionState, err error) {
+func traceTLSHandshakeDone(trace *httptrace.ClientTrace, state utls.ConnectionState, err error) {
 	if trace != nil && trace.TLSHandshakeDone != nil {
-		trace.TLSHandshakeDone(state, err)
+		trace.TLSHandshakeDone(tls.ConnectionState{
+			Version:                    state.Version,
+			HandshakeComplete:          state.HandshakeComplete,
+			DidResume:                  state.DidResume,
+			CipherSuite:                state.CipherSuite,
+			NegotiatedProtocol:         state.NegotiatedProtocol,
+			NegotiatedProtocolIsMutual: state.NegotiatedProtocolIsMutual,
+			ServerName:                 state.ServerName,
+			PeerCertificates:           state.PeerCertificates,
+		}, err)
 	}
 }

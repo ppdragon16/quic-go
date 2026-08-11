@@ -4,13 +4,14 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
 	"math/big"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go"
 )
@@ -55,11 +56,11 @@ func echoServer() error {
 }
 
 func clientMain() error {
-	tlsConf := &tls.Config{
+	utlsConf := &utls.Config{
 		InsecureSkipVerify: true,
 		NextProtos:         []string{"quic-echo-example"},
 	}
-	conn, err := quic.DialAddr(context.Background(), addr, tlsConf, nil)
+	conn, err := quic.DialAddr(context.Background(), addr, utlsConf, nil)
 	if err != nil {
 		return err
 	}
@@ -96,7 +97,7 @@ func (w loggingWriter) Write(b []byte) (int, error) {
 }
 
 // Setup a bare-bones TLS config for the server
-func generateTLSConfig() *tls.Config {
+func generateTLSConfig() *utls.Config {
 	key, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
 		panic(err)
@@ -109,12 +110,12 @@ func generateTLSConfig() *tls.Config {
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 
-	tlsCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	utlsCert, err := utls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
 		panic(err)
 	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{tlsCert},
+	return &utls.Config{
+		Certificates: []utls.Certificate{utlsCert},
 		NextProtos:   []string{"quic-echo-example"},
 	}
 }

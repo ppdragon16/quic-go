@@ -1,12 +1,13 @@
 package main
 
 import (
-	"crypto/tls"
 	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"os"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go"
 	"github.com/daeuniverse/quic-go/http3"
@@ -39,27 +40,27 @@ func main() {
 		Allow0RTT: testcase == "zerortt",
 		Tracer:    utils.NewQLOGConnectionTracer,
 	}
-	cert, err := tls.LoadX509KeyPair("/certs/cert.pem", "/certs/priv.key")
+	cert, err := utls.LoadX509KeyPair("/certs/cert.pem", "/certs/priv.key")
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
-	tlsConf := &tls.Config{
-		Certificates: []tls.Certificate{cert},
+	utlsConf := &utls.Config{
+		Certificates: []utls.Certificate{cert},
 		KeyLogWriter: keyLog,
 		NextProtos:   []string{http09.NextProto},
 	}
 
 	switch testcase {
 	case "versionnegotiation", "handshake", "retry", "transfer", "resumption", "multiconnect", "zerortt":
-		err = runHTTP09Server(tlsConf, quicConf, testcase == "retry")
+		err = runHTTP09Server(utlsConf, quicConf, testcase == "retry")
 	case "chacha20":
-		reset := qtls.SetCipherSuite(tls.TLS_CHACHA20_POLY1305_SHA256)
+		reset := qtls.SetCipherSuite(utls.TLS_CHACHA20_POLY1305_SHA256)
 		defer reset()
-		err = runHTTP09Server(tlsConf, quicConf, false)
+		err = runHTTP09Server(utlsConf, quicConf, false)
 	case "http3":
-		tlsConf.NextProtos = []string{http3.NextProtoH3}
-		err = runHTTP3Server(tlsConf, quicConf)
+		utlsConf.NextProtos = []string{http3.NextProtoH3}
+		err = runHTTP3Server(utlsConf, quicConf)
 	default:
 		fmt.Printf("unsupported test case: %s\n", testcase)
 		os.Exit(127)
@@ -71,7 +72,7 @@ func main() {
 	}
 }
 
-func runHTTP09Server(tlsConf *tls.Config, quicConf *quic.Config, forceRetry bool) error {
+func runHTTP09Server(utlsConf *utls.Config, quicConf *quic.Config, forceRetry bool) error {
 	http.DefaultServeMux.Handle("/", http.FileServer(http.Dir("/www")))
 	server := http09.Server{}
 
@@ -87,17 +88,17 @@ func runHTTP09Server(tlsConf *tls.Config, quicConf *quic.Config, forceRetry bool
 		Conn:                conn,
 		VerifySourceAddress: func(net.Addr) bool { return forceRetry },
 	}
-	ln, err := tr.ListenEarly(tlsConf, quicConf)
+	ln, err := tr.ListenEarly(utlsConf, quicConf)
 	if err != nil {
 		return err
 	}
 	return server.ServeListener(ln)
 }
 
-func runHTTP3Server(tlsConf *tls.Config, quicConf *quic.Config) error {
+func runHTTP3Server(utlsConf *utls.Config, quicConf *quic.Config) error {
 	server := http3.Server{
 		Addr:       ":443",
-		TLSConfig:  tlsConf,
+		TLSConfig:  utlsConf,
 		QUICConfig: quicConf,
 	}
 	http.DefaultServeMux.Handle("/", http.FileServer(http.Dir("/www")))

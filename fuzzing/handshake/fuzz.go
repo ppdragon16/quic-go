@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -15,6 +14,8 @@ import (
 	"net"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
+
 	"github.com/daeuniverse/quic-go/fuzzing/internal/helper"
 	"github.com/daeuniverse/quic-go/internal/handshake"
 	"github.com/daeuniverse/quic-go/internal/protocol"
@@ -24,7 +25,7 @@ import (
 )
 
 var (
-	cert, clientCert         *tls.Certificate
+	cert, clientCert         *utls.Certificate
 	certPool, clientCertPool *x509.CertPool
 	sessionTicketKey         = [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 )
@@ -87,18 +88,18 @@ func (m messageType) String() string {
 }
 
 // consumes 3 bits
-func getClientAuth(rand uint8) tls.ClientAuthType {
+func getClientAuth(rand uint8) utls.ClientAuthType {
 	switch rand {
 	default:
-		return tls.NoClientCert
+		return utls.NoClientCert
 	case 0:
-		return tls.RequestClientCert
+		return utls.RequestClientCert
 	case 1:
-		return tls.RequireAnyClientCert
+		return utls.RequireAnyClientCert
 	case 2:
-		return tls.VerifyClientCertIfGiven
+		return utls.VerifyClientCertIfGiven
 	case 3:
-		return tls.RequireAndVerifyClientCert
+		return utls.RequireAndVerifyClientCert
 	}
 }
 
@@ -157,15 +158,15 @@ func Fuzz(data []byte) int {
 		panic("incorrect configuration")
 	}
 
-	clientConf := &tls.Config{
-		MinVersion: tls.VersionTLS13,
+	clientConf := &utls.Config{
+		MinVersion: utls.VersionTLS13,
 		ServerName: "localhost",
 		NextProtos: []string{alpn},
 		RootCAs:    certPool,
 	}
 	useSessionTicketCache := helper.NthBit(runConfig1[0], 2)
 	if useSessionTicketCache {
-		clientConf.ClientSessionCache = tls.NewLRUClientSessionCache(5)
+		clientConf.ClientSessionCache = utls.NewLRUClientSessionCache(5)
 	}
 
 	if val := runHandshake(runConfig1, messageConfig1, clientConf, data); val != 1 {
@@ -174,24 +175,24 @@ func Fuzz(data []byte) int {
 	return runHandshake(runConfig2, messageConfig2, clientConf, data)
 }
 
-func runHandshake(runConfig [confLen]byte, messageConfig uint8, clientConf *tls.Config, data []byte) int {
-	serverConf := &tls.Config{
-		MinVersion:       tls.VersionTLS13,
-		Certificates:     []tls.Certificate{*cert},
+func runHandshake(runConfig [confLen]byte, messageConfig uint8, clientConf *utls.Config, data []byte) int {
+	serverConf := &utls.Config{
+		MinVersion:       utls.VersionTLS13,
+		Certificates:     []utls.Certificate{*cert},
 		NextProtos:       []string{alpn},
 		SessionTicketKey: sessionTicketKey,
 	}
 
 	// This sets the cipher suite for both client and server.
-	// The way crypto/tls is designed doesn't allow us to set different cipher suites for client and server.
+	// The way crypto/utls is designed doesn't allow us to set different cipher suites for client and server.
 	resetCipherSuite := func() {}
 	switch (runConfig[0] >> 6) % 4 {
 	case 0:
-		resetCipherSuite = qtls.SetCipherSuite(tls.TLS_AES_128_GCM_SHA256)
+		resetCipherSuite = qtls.SetCipherSuite(utls.TLS_AES_128_GCM_SHA256)
 	case 1:
-		resetCipherSuite = qtls.SetCipherSuite(tls.TLS_AES_256_GCM_SHA384)
+		resetCipherSuite = qtls.SetCipherSuite(utls.TLS_AES_256_GCM_SHA384)
 	case 3:
-		resetCipherSuite = qtls.SetCipherSuite(tls.TLS_CHACHA20_POLY1305_SHA256)
+		resetCipherSuite = qtls.SetCipherSuite(utls.TLS_CHACHA20_POLY1305_SHA256)
 	default:
 	}
 	defer resetCipherSuite()
@@ -212,7 +213,7 @@ func runHandshake(runConfig [confLen]byte, messageConfig uint8, clientConf *tls.
 		serverConf.ClientCAs = x509.NewCertPool()
 	}
 	if helper.NthBit(runConfig[2], 2) {
-		serverConf.GetConfigForClient = func(*tls.ClientHelloInfo) (*tls.Config, error) {
+		serverConf.GetConfigForClient = func(*utls.ClientHelloInfo) (*utls.Config, error) {
 			if helper.NthBit(runConfig[2], 3) {
 				return nil, errors.New("getting client config failed")
 			}
@@ -223,7 +224,7 @@ func runHandshake(runConfig [confLen]byte, messageConfig uint8, clientConf *tls.
 		}
 	}
 	if helper.NthBit(runConfig[2], 5) {
-		serverConf.GetCertificate = func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+		serverConf.GetCertificate = func(*utls.ClientHelloInfo) (*utls.Certificate, error) {
 			if helper.NthBit(runConfig[2], 6) {
 				return nil, errors.New("getting certificate failed")
 			}

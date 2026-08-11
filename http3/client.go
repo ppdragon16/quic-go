@@ -2,6 +2,7 @@ package http3
 
 import (
 	"context"
+	xtls "crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -351,7 +352,16 @@ func (c *ClientConn) doRequest(req *http.Request, str *requestStream) (*http.Res
 		break
 	}
 	connState := c.connection.ConnectionState().TLS
-	res.TLS = &connState
+	res.TLS = &xtls.ConnectionState{
+		Version:                    connState.Version,
+		HandshakeComplete:          connState.HandshakeComplete,
+		DidResume:                  connState.DidResume,
+		CipherSuite:                connState.CipherSuite,
+		NegotiatedProtocol:         connState.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual: connState.NegotiatedProtocolIsMutual,
+		ServerName:                 connState.ServerName,
+		PeerCertificates:           connState.PeerCertificates,
+	}
 	res.Request = req
 	return res, nil
 }

@@ -2,10 +2,11 @@ package handshake
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/wire"
@@ -55,7 +56,7 @@ type ShortHeaderSealer interface {
 }
 
 type ConnectionState struct {
-	tls.ConnectionState
+	utls.ConnectionState
 	Used0RTT bool
 }
 

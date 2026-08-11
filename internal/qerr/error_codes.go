@@ -1,8 +1,9 @@
 package qerr
 
 import (
-	"crypto/tls"
 	"fmt"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 // TransportErrorCode is a QUIC transport error.
@@ -39,7 +40,7 @@ func (e TransportErrorCode) Message() string {
 	if !e.IsCryptoError() {
 		return ""
 	}
-	return tls.AlertError(e - 0x100).Error()
+	return utls.AlertError(e - 0x100).Error()
 }
 
 func (e TransportErrorCode) String() string {

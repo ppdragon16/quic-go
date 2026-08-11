@@ -2,7 +2,6 @@ package http3
 
 import (
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+
+	utls "github.com/refraction-networking/utls"
 
 	"golang.org/x/net/http/httpguts"
 
@@ -64,8 +65,8 @@ func (r *roundTripperWithCount) Close() error {
 // Transport implements the http.RoundTripper interface
 type Transport struct {
 	// TLSClientConfig specifies the TLS configuration to use with
-	// tls.Client. If nil, the default configuration is used.
-	TLSClientConfig *tls.Config
+	// utls.Client. If nil, the default configuration is used.
+	TLSClientConfig *utls.Config
 
 	// QUICConfig is the quic.Config used for dialing new connections.
 	// If nil, reasonable default values will be used.
@@ -75,7 +76,7 @@ type Transport struct {
 	// connections for requests.
 	// If Dial is nil, a UDPConn will be created at the first request
 	// and will be reused for subsequent connections to other servers.
-	Dial func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error)
+	Dial func(ctx context.Context, addr string, tlsCfg *utls.Config, cfg *quic.Config) (quic.EarlyConnection, error)
 
 	// Enable support for HTTP/3 datagrams (RFC 9297).
 	// If a QUICConfig is set, datagram support also needs to be enabled on the QUIC layer by setting EnableDatagrams.
@@ -307,9 +308,9 @@ func (t *Transport) getClient(ctx context.Context, hostname string, onlyCached b
 }
 
 func (t *Transport) dial(ctx context.Context, hostname string) (quic.EarlyConnection, clientConn, error) {
-	var tlsConf *tls.Config
+	var tlsConf *utls.Config
 	if t.TLSClientConfig == nil {
-		tlsConf = &tls.Config{}
+		tlsConf = &utls.Config{}
 	} else {
 		tlsConf = t.TLSClientConfig.Clone()
 	}
@@ -333,7 +334,7 @@ func (t *Transport) dial(ctx context.Context, hostname string) (quic.EarlyConnec
 			}
 			t.transport = &quic.Transport{Conn: udpConn}
 		}
-		dial = func(ctx context.Context, addr string, tlsCfg *tls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
+		dial = func(ctx context.Context, addr string, tlsCfg *utls.Config, cfg *quic.Config) (quic.EarlyConnection, error) {
 			network := "udp"
 			udpAddr, err := t.resolveUDPAddr(ctx, network, addr)
 			if err != nil {
@@ -343,7 +344,7 @@ func (t *Transport) dial(ctx context.Context, hostname string) (quic.EarlyConnec
 			traceConnectStart(trace, network, udpAddr.String())
 			traceTLSHandshakeStart(trace)
 			conn, err := t.transport.DialEarly(ctx, udpAddr, tlsCfg, cfg)
-			var state tls.ConnectionState
+			var state utls.ConnectionState
 			if conn != nil {
 				state = conn.ConnectionState().TLS
 			}

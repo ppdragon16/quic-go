@@ -3,7 +3,6 @@ package quic
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	utls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/congestion"
 	"github.com/daeuniverse/quic-go/internal/ackhandler"
@@ -229,7 +230,7 @@ var newConnection = func(
 	connIDGenerator ConnectionIDGenerator,
 	statelessResetter *statelessResetter,
 	conf *Config,
-	tlsConf *tls.Config,
+	tlsConf *utls.Config,
 	tokenGenerator *handshake.TokenGenerator,
 	clientAddressValidated bool,
 	tracer *logging.ConnectionTracer,
@@ -346,7 +347,7 @@ var newClientConnection = func(
 	connIDGenerator ConnectionIDGenerator,
 	statelessResetter *statelessResetter,
 	conf *Config,
-	tlsConf *tls.Config,
+	tlsConf *utls.Config,
 	initialPacketNumber protocol.PacketNumber,
 	enable0RTT bool,
 	hasNegotiatedVersion bool,
@@ -779,7 +780,7 @@ func (s *connection) handleHandshakeComplete(now time.Time) error {
 	if err != nil {
 		return err
 	}
-	if ticket != nil { // may be nil if session tickets are disabled via tls.Config.SessionTicketsDisabled
+	if ticket != nil { // may be nil if session tickets are disabled via utls.Config.SessionTicketsDisabled
 		s.oneRTTStream.Write(ticket)
 		for s.oneRTTStream.HasData() {
 			s.queueControlFrame(s.oneRTTStream.PopCryptoFrame(protocol.MaxPostHandshakeCryptoFrameSize))

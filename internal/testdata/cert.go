@@ -1,11 +1,12 @@
 package testdata
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"os"
 	"path"
 	"runtime"
+
+	utls "github.com/refraction-networking/utls"
 )
 
 var certPath string
@@ -25,14 +26,14 @@ func GetCertificatePaths() (string, string) {
 }
 
 // GetTLSConfig returns a tls config for quic.clemente.io
-func GetTLSConfig() *tls.Config {
-	cert, err := tls.LoadX509KeyPair(GetCertificatePaths())
+func GetTLSConfig() *utls.Config {
+	cert, err := utls.LoadX509KeyPair(GetCertificatePaths())
 	if err != nil {
 		panic(err)
 	}
-	return &tls.Config{
-		MinVersion:   tls.VersionTLS13,
-		Certificates: []tls.Certificate{cert},
+	return &utls.Config{
+		MinVersion:   utls.VersionTLS13,
+		Certificates: []utls.Certificate{cert},
 	}
 }
 

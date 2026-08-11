@@ -2,7 +2,7 @@ package http3
 
 import (
 	"context"
-	"crypto/tls"
+	xtls "crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +16,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	utls "github.com/refraction-networking/utls"
+
 	"github.com/daeuniverse/quic-go"
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/quicvarint"
@@ -25,10 +27,10 @@ import (
 
 // allows mocking of quic.Listen and quic.ListenAddr
 var (
-	quicListen = func(conn net.PacketConn, tlsConf *tls.Config, config *quic.Config) (QUICEarlyListener, error) {
+	quicListen = func(conn net.PacketConn, tlsConf *utls.Config, config *quic.Config) (QUICEarlyListener, error) {
 		return quic.ListenEarly(conn, tlsConf, config)
 	}
-	quicListenAddr = func(addr string, tlsConf *tls.Config, config *quic.Config) (QUICEarlyListener, error) {
+	quicListenAddr = func(addr string, tlsConf *utls.Config, config *quic.Config) (QUICEarlyListener, error) {
 		return quic.ListenAddrEarly(addr, tlsConf, config)
 	}
 )
@@ -67,15 +69,15 @@ func versionToALPN(v protocol.Version) string {
 	}
 }
 
-// ConfigureTLSConfig creates a new tls.Config which can be used
+// ConfigureTLSConfig creates a new utls.Config which can be used
 // to create a quic.Listener meant for serving http3. The created
-// tls.Config adds the functionality of detecting the used QUIC version
+// utls.Config adds the functionality of detecting the used QUIC version
 // in order to set the correct ALPN value for the http3 connection.
-func ConfigureTLSConfig(tlsConf *tls.Config) *tls.Config {
-	// The tls.Config used to setup the quic.Listener needs to have the GetConfigForClient callback set.
+func ConfigureTLSConfig(tlsConf *utls.Config) *utls.Config {
+	// The utls.Config used to setup the quic.Listener needs to have the GetConfigForClient callback set.
 	// That way, we can get the QUIC version and set the correct ALPN value.
-	return &tls.Config{
-		GetConfigForClient: func(ch *tls.ClientHelloInfo) (*tls.Config, error) {
+	return &utls.Config{
+		GetConfigForClient: func(ch *utls.ClientHelloInfo) (*utls.Config, error) {
 			// determine the ALPN from the QUIC version used
 			proto := NextProtoH3
 			val := ch.Context().Value(quic.QUICVersionContextKey)
@@ -99,7 +101,7 @@ func ConfigureTLSConfig(tlsConf *tls.Config) *tls.Config {
 			}
 			// Workaround for https://github.com/golang/go/issues/60506.
 			// This initializes the session tickets _before_ cloning the config.
-			_, _ = config.DecryptTicket(nil, tls.ConnectionState{})
+			_, _ = config.DecryptTicket(nil, utls.ConnectionState{})
 
 			config = config.Clone()
 			config.NextProtos = []string{proto}
@@ -161,7 +163,7 @@ type Server struct {
 
 	// TLSConfig provides a TLS configuration for use by server. It must be
 	// set for ListenAndServe and Serve methods.
-	TLSConfig *tls.Config
+	TLSConfig *utls.Config
 
 	// QUICConfig provides the parameters for QUIC connection created with Serve.
 	// If nil, it uses reasonable default values.
@@ -245,14 +247,14 @@ func (s *Server) ListenAndServe() error {
 // If s.Addr is blank, ":https" is used.
 func (s *Server) ListenAndServeTLS(certFile, keyFile string) error {
 	var err error
-	certs := make([]tls.Certificate, 1)
-	certs[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+	certs := make([]utls.Certificate, 1)
+	certs[0], err = utls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return err
 	}
-	// We currently only use the cert-related stuff from tls.Config,
+	// We currently only use the cert-related stuff from utls.Config,
 	// so we don't need to make a full copy.
-	ln, err := s.setupListenerForConn(&tls.Config{Certificates: certs}, nil)
+	ln, err := s.setupListenerForConn(&utls.Config{Certificates: certs}, nil)
 	if err != nil {
 		return err
 	}
@@ -303,7 +305,7 @@ func (s *Server) ServeQUICConn(conn quic.Connection) error {
 }
 
 // ServeListener serves an existing QUIC listener.
-// Make sure you use http3.ConfigureTLSConfig to configure a tls.Config
+// Make sure you use http3.ConfigureTLSConfig to configure a utls.Config
 // and use it to construct a http3-friendly QUIC listener.
 // Closing the server does close the listener.
 // ServeListener always returns a non-nil error. After Shutdown or Close, the returned error is http.ErrServerClosed.
@@ -343,7 +345,7 @@ func (s *Server) serveListener(ln QUICEarlyListener) error {
 
 var errServerWithoutTLSConfig = errors.New("use of http3.Server without TLSConfig")
 
-func (s *Server) setupListenerForConn(tlsConf *tls.Config, conn net.PacketConn) (QUICEarlyListener, error) {
+func (s *Server) setupListenerForConn(tlsConf *utls.Config, conn net.PacketConn) (QUICEarlyListener, error) {
 	if tlsConf == nil {
 		return nil, errServerWithoutTLSConfig
 	}
@@ -640,7 +642,16 @@ func (s *Server) handleRequest(conn *connection, str quic.Stream, datagrams *dat
 	}
 
 	connState := conn.ConnectionState().TLS
-	req.TLS = &connState
+	req.TLS = &xtls.ConnectionState{
+		Version:                    connState.Version,
+		HandshakeComplete:          connState.HandshakeComplete,
+		DidResume:                  connState.DidResume,
+		CipherSuite:                connState.CipherSuite,
+		NegotiatedProtocol:         connState.NegotiatedProtocol,
+		NegotiatedProtocolIsMutual: connState.NegotiatedProtocolIsMutual,
+		ServerName:                 connState.ServerName,
+		PeerCertificates:           connState.PeerCertificates,
+	}
 	req.RemoteAddr = conn.RemoteAddr().String()
 
 	// Check that the client doesn't send more data in DATA frames than indicated by the Content-Length header (if set).
@@ -822,14 +833,14 @@ func ListenAndServeQUIC(addr, certFile, keyFile string, handler http.Handler) er
 func ListenAndServeTLS(addr, certFile, keyFile string, handler http.Handler) error {
 	// Load certs
 	var err error
-	certs := make([]tls.Certificate, 1)
-	certs[0], err = tls.LoadX509KeyPair(certFile, keyFile)
+	certs := make([]utls.Certificate, 1)
+	certs[0], err = utls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
 		return err
 	}
-	// We currently only use the cert-related stuff from tls.Config,
+	// We currently only use the cert-related stuff from utls.Config,
 	// so we don't need to make a full copy.
-	config := &tls.Config{
+	config := &utls.Config{
 		Certificates: certs,
 	}
 
