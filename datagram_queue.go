@@ -2,7 +2,9 @@ package quic
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"time"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/utils"
@@ -28,6 +30,27 @@ const (
 	// caps the pool's footprint while still absorbing line-rate bursts.
 	maxDatagramBufPoolLen = 256
 )
+
+// datagramSendQueueFullTimeout bounds how long Add waits on a full send queue
+// before dropping the datagram and returning ErrDatagramQueueFullTimeout. It
+// is a var so tests can shorten the wait.
+//
+// The timer measures the length of a *zero-drain* stall: every datagram that
+// is dequeued (h.sent) resets it, so slow-but-steady backpressure never trips
+// it — only a queue that stays full with nothing sent for the whole interval
+// does. 15s is far above a transient congestion burst (cwnd collapse + recovery
+// is RTT-scale, sub-second to a few seconds) and below the default QUIC idle
+// timeout (30s, see hy2 defaultMaxIdleTimeout). The idle timeout is receive-side
+// and is masked by KeepAlivePeriod PING/ACKs while the peer is reachable, so a
+// send-side stall (datagrams can't drain) would otherwise never time out; this
+// is the only bound on such a stall.
+var datagramSendQueueFullTimeout = 15 * time.Second
+
+// ErrDatagramQueueFullTimeout is returned by Add when the send queue stayed
+// full for datagramSendQueueFullTimeout. The datagram was dropped and the
+// connection is still alive; callers may retry with a later datagram, or treat
+// the error as a signal that the transport is stalled and retire it.
+var ErrDatagramQueueFullTimeout = errors.New("datagram send queue full: timed out")
 
 // datagramBufPool recycles the receive-side datagram buffers. Incoming
 // DATAGRAM frames are copied out of the packet buffer into one of these,
@@ -119,9 +142,22 @@ func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 // Add queues a new DATAGRAM frame for sending.
 // The send queue starts at initDatagramSendQueueLen entries and grows once
 // to maxDatagramSendQueueLen on first overflow. Once the maximum is reached,
-// Add blocks until space is available.
+// Add blocks until space is available or datagramSendQueueFullTimeout elapses,
+// whichever comes first. The timeout bounds a send-side stall (queue full with
+// nothing dequeued) so a stalled transport cannot strand the caller forever.
 func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 	h.sendMx.Lock()
+
+	// Allocated lazily on the first block so the common (non-blocking) path
+	// does not pay for a timer, then reused across blocking iterations so a
+	// stalled queue under sustained backpressure doesn't allocate one per
+	// blocked datagram.
+	var timer *time.Timer
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 
 	for {
 		if h.sendQueue.Len() < h.sendQueue.Cap() {
@@ -141,6 +177,19 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 		default:
 		}
 		h.sendMx.Unlock()
+
+		if timer == nil {
+			timer = time.NewTimer(datagramSendQueueFullTimeout)
+		} else {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(datagramSendQueueFullTimeout)
+		}
+
 		select {
 		case <-h.closed:
 			// Connection closed while blocked on a full queue: the frame
@@ -148,6 +197,12 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 			wire.PutDatagramFrame(f)
 			return h.closeErr
 		case <-h.sent:
+		case <-timer.C:
+			// Queue stayed full with nothing dequeued for the whole timeout:
+			// the transport is stalled, not merely backpressured. Drop this
+			// datagram and surface a bounded error instead of parking forever.
+			wire.PutDatagramFrame(f)
+			return ErrDatagramQueueFullTimeout
 		}
 		h.sendMx.Lock()
 	}

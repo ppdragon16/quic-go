@@ -159,3 +159,32 @@ func TestDatagramQueueClose(t *testing.T) {
 		t.Fatal("timeout")
 	}
 }
+
+// A full send queue must surface ErrDatagramQueueFullTimeout after
+// datagramSendQueueFullTimeout instead of parking the sender forever, and the
+// connection must stay alive so a later datagram can still be queued.
+func TestDatagramQueueAddTimeout(t *testing.T) {
+	queue := newDatagramQueue(func() {}, utils.DefaultLogger)
+
+	for i := 0; i < maxDatagramSendQueueLen; i++ {
+		require.NoError(t, queue.Add(&wire.DatagramFrame{Data: []byte{0}}))
+	}
+
+	old := datagramSendQueueFullTimeout
+	datagramSendQueueFullTimeout = scaleDuration(20 * time.Millisecond)
+	defer func() { datagramSendQueueFullTimeout = old }()
+
+	errChan := make(chan error, 1)
+	go func() { errChan <- queue.Add(&wire.DatagramFrame{Data: []byte("foobar")}) }()
+
+	select {
+	case err := <-errChan:
+		require.ErrorIs(t, err, ErrDatagramQueueFullTimeout)
+	case <-time.After(scaleDuration(2 * time.Second)):
+		t.Fatal("expected Add to return after the queue-full timeout")
+	}
+
+	// The connection is still alive: once the queue drains, a subsequent Add succeeds.
+	queue.Pop()
+	require.NoError(t, queue.Add(&wire.DatagramFrame{Data: []byte("baz")}))
+}
