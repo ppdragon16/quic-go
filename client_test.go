@@ -2,11 +2,12 @@ package quic
 
 import (
 	"context"
-	"crypto/tls"
 	"net"
 	"runtime"
 	"testing"
 	"time"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/stretchr/testify/require"
 )

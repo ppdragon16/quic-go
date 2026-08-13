@@ -4,13 +4,14 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"errors"
 	"net"
 	"net/netip"
 	"strconv"
 	"testing"
 	"time"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/internal/ackhandler"
 	"github.com/daeuniverse/quic-go/internal/handshake"

@@ -2,10 +2,11 @@ package versionnegotiation
 
 import (
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"flag"
 	"os"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go"
 	"github.com/daeuniverse/quic-go/integrationtests/tools"

@@ -2,86 +2,84 @@ package handshake
 
 import (
 	"crypto"
-	"crypto/cipher"
-	"crypto/tls"
 	"testing"
-	"unsafe"
 
 	"golang.org/x/exp/rand"
 
 	"github.com/stretchr/testify/require"
 )
 
-type cipherSuiteTLS13 struct {
-	ID     uint16
-	KeyLen int
-	AEAD   func(key, fixedNonce []byte) cipher.AEAD
-	Hash   crypto.Hash
-}
-
-//go:linkname cipherSuitesTLS13 crypto/tls.cipherSuitesTLS13
-var cipherSuitesTLS13 []unsafe.Pointer
-
-func cipherSuiteTLS13ByID(id uint16) *cipherSuiteTLS13 {
-	for _, v := range cipherSuitesTLS13 {
-		cs := (*cipherSuiteTLS13)(v)
-		if cs.ID == id {
-			return cs
-		}
-	}
-	return nil
-}
-
-//go:linkname expandLabel crypto/tls.(*cipherSuiteTLS13).expandLabel
-func expandLabel(cs *cipherSuiteTLS13, secret []byte, label string, context []byte, length int) []byte
-
+// The expected values below are the RFC 8446 (section 7.1) HKDF-Expand-Label
+// outputs for secret="secret", context="context", label="label" and the given
+// output length, computed independently via the standard library's crypto/hkdf.
+// utls no longer exposes the crypto/tls cipherSuiteTLS13.expandLabel symbol that
+// the previous test linknamed against, so we validate against fixed vectors
+// instead of calling into the reference implementation at test time.
 func TestHKDF(t *testing.T) {
 	testCases := []struct {
-		name        string
-		cipherSuite uint16
-		secret      []byte
-		context     []byte
-		label       string
-		length      int
+		name     string
+		hash     crypto.Hash
+		length   int
+		expected []byte
 	}{
-		{"TLS_AES_128_GCM_SHA256", tls.TLS_AES_128_GCM_SHA256, []byte("secret"), []byte("context"), "label", 42},
-		{"TLS_AES_256_GCM_SHA384", tls.TLS_AES_256_GCM_SHA384, []byte("secret"), []byte("context"), "label", 100},
-		{"TLS_CHACHA20_POLY1305_SHA256", tls.TLS_CHACHA20_POLY1305_SHA256, []byte("secret"), []byte("context"), "label", 77},
+		{
+			"TLS_AES_128_GCM_SHA256",
+			crypto.SHA256,
+			42,
+			[]byte{
+				0x78, 0x87, 0x6a, 0xb5, 0x84, 0xa2, 0x26, 0xb7, 0x08, 0x5a, 0x7b, 0x3a, 0x4c, 0xbb, 0x1e, 0xbc,
+				0x2f, 0x9b, 0x67, 0xd0, 0x6a, 0xa2, 0x24, 0xb4, 0x7d, 0x29, 0x3c, 0x7a, 0xce, 0xc7, 0xc3, 0x74,
+				0xcd, 0x59, 0x7a, 0xa8, 0x21, 0x5e, 0xe7, 0xca, 0x01, 0xda,
+			},
+		},
+		{
+			"TLS_AES_256_GCM_SHA384",
+			crypto.SHA384,
+			100,
+			[]byte{
+				0xce, 0x1c, 0x5a, 0x4d, 0x86, 0xb2, 0x3f, 0x58, 0x9f, 0xc6, 0x4f, 0xb2, 0x41, 0xf8, 0x62, 0x8b,
+				0x39, 0xbb, 0x9f, 0x6e, 0xbc, 0x81, 0xf2, 0x5f, 0x33, 0x13, 0x03, 0xaa, 0x66, 0x91, 0x8f, 0x7e,
+				0xa6, 0x40, 0x27, 0x0c, 0xbd, 0x33, 0x6e, 0x7a, 0xf4, 0xbe, 0xef, 0x3d, 0x34, 0x2d, 0xa5, 0xbd,
+				0x36, 0x75, 0x33, 0x39, 0x77, 0x6c, 0xd5, 0x02, 0x90, 0xc5, 0x92, 0xb9, 0x4e, 0x4c, 0xf7, 0x86,
+				0x96, 0x8f, 0x3f, 0x7b, 0x8c, 0x5b, 0x5f, 0x68, 0x0c, 0x83, 0xe2, 0xa5, 0x84, 0xe3, 0x27, 0x3f,
+				0xe5, 0xd0, 0xcd, 0x4a, 0xd1, 0xf6, 0xa4, 0x66, 0x49, 0xeb, 0xee, 0x8c, 0x38, 0xb1, 0x6b, 0x97,
+				0x36, 0xa2, 0xd6, 0xc8,
+			},
+		},
+		{
+			"TLS_CHACHA20_POLY1305_SHA256",
+			crypto.SHA256,
+			77,
+			[]byte{
+				0x69, 0xaf, 0x6a, 0xbb, 0x19, 0xe5, 0x9d, 0x00, 0xf1, 0xbd, 0x90, 0x2e, 0x78, 0x67, 0xa0, 0xa6,
+				0xa1, 0xa2, 0x61, 0x01, 0x47, 0x83, 0xcf, 0x34, 0x0b, 0xa4, 0x6b, 0xa9, 0xa5, 0xe6, 0x4c, 0x11,
+				0x55, 0x9e, 0xd4, 0xf4, 0x07, 0x39, 0xf8, 0x4f, 0x1b, 0x66, 0x46, 0xcd, 0x6f, 0x69, 0x25, 0x50,
+				0xd9, 0x81, 0xc7, 0xbb, 0x59, 0xcc, 0x1b, 0x6e, 0xac, 0x76, 0x69, 0xfb, 0x01, 0x33, 0x96, 0xa4,
+				0x89, 0x7b, 0xfe, 0x3b, 0x89, 0x8d, 0x4b, 0xa2, 0x9b, 0xbd, 0x86, 0xd0, 0x80,
+			},
+		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			cs := cipherSuiteTLS13ByID(tc.cipherSuite)
-			expected := expandLabel(cs, tc.secret, tc.label, tc.context, tc.length)
-			expanded := hkdfExpandLabel(cs.Hash, tc.secret, tc.context, tc.label, tc.length)
-			require.Equal(t, expected, expanded)
+			expanded := hkdfExpandLabel(tc.hash, []byte("secret"), []byte("context"), "label", tc.length)
+			require.Equal(t, tc.expected, expanded)
 		})
 	}
 }
 
-func BenchmarkHKDFExpandLabelStandardLibrary(b *testing.B) {
-	b.Run("TLS_AES_128_GCM_SHA256", func(b *testing.B) { benchmarkHKDFExpandLabel(b, tls.TLS_AES_128_GCM_SHA256, true) })
-	b.Run("TLS_AES_256_GCM_SHA384", func(b *testing.B) { benchmarkHKDFExpandLabel(b, tls.TLS_AES_256_GCM_SHA384, true) })
-	b.Run("TLS_CHACHA20_POLY1305_SHA256", func(b *testing.B) { benchmarkHKDFExpandLabel(b, tls.TLS_CHACHA20_POLY1305_SHA256, true) })
+func BenchmarkHKDFExpandLabel(b *testing.B) {
+	b.Run("TLS_AES_128_GCM_SHA256", func(b *testing.B) { benchmarkHKDFExpandLabel(b, crypto.SHA256, 42) })
+	b.Run("TLS_AES_256_GCM_SHA384", func(b *testing.B) { benchmarkHKDFExpandLabel(b, crypto.SHA384, 100) })
+	b.Run("TLS_CHACHA20_POLY1305_SHA256", func(b *testing.B) { benchmarkHKDFExpandLabel(b, crypto.SHA256, 77) })
 }
 
-func BenchmarkHKDFExpandLabelOptimized(b *testing.B) {
-	b.Run("TLS_AES_128_GCM_SHA256", func(b *testing.B) { benchmarkHKDFExpandLabel(b, tls.TLS_AES_128_GCM_SHA256, false) })
-	b.Run("TLS_AES_256_GCM_SHA384", func(b *testing.B) { benchmarkHKDFExpandLabel(b, tls.TLS_AES_256_GCM_SHA384, false) })
-	b.Run("TLS_CHACHA20_POLY1305_SHA256", func(b *testing.B) { benchmarkHKDFExpandLabel(b, tls.TLS_CHACHA20_POLY1305_SHA256, false) })
-}
-
-func benchmarkHKDFExpandLabel(b *testing.B, cipherSuite uint16, useStdLib bool) {
+func benchmarkHKDFExpandLabel(b *testing.B, hash crypto.Hash, length int) {
 	b.ReportAllocs()
-	cs := cipherSuiteTLS13ByID(cipherSuite)
 	secret := make([]byte, 32)
 	rand.Read(secret)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if useStdLib {
-			expandLabel(cs, secret, "label", []byte("context"), 42)
-		} else {
-			hkdfExpandLabel(cs.Hash, secret, []byte("context"), "label", 42)
-		}
+		hkdfExpandLabel(hash, secret, []byte("context"), "label", length)
 	}
 }

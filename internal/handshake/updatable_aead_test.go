@@ -2,11 +2,12 @@ package handshake
 
 import (
 	"crypto/rand"
-	"crypto/tls"
 	"fmt"
 	mrand "math/rand/v2"
 	"testing"
 	"time"
+
+	tls "github.com/refraction-networking/utls"
 
 	mocklogging "github.com/daeuniverse/quic-go/internal/mocks/logging"
 	"github.com/daeuniverse/quic-go/internal/protocol"

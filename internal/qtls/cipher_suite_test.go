@@ -1,10 +1,11 @@
 package qtls
 
 import (
-	"crypto/tls"
 	"fmt"
 	"net"
 	"testing"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go/internal/testdata"
 

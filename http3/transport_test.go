@@ -3,12 +3,13 @@ package http3
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"net/http"
 	"testing"
 	"time"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go"
 	mockquic "github.com/daeuniverse/quic-go/internal/mocks/quic"

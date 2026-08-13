@@ -7,13 +7,13 @@ import (
 	utls "github.com/refraction-networking/utls"
 )
 
-//go:linkname cipherSuitesTLS13 crypto/utls.cipherSuitesTLS13
+//go:linkname cipherSuitesTLS13 github.com/refraction-networking/utls.cipherSuitesTLS13
 var cipherSuitesTLS13 []unsafe.Pointer
 
-//go:linkname defaultCipherSuitesTLS13 crypto/utls.defaultCipherSuitesTLS13
+//go:linkname defaultCipherSuitesTLS13 github.com/refraction-networking/utls.defaultCipherSuitesTLS13
 var defaultCipherSuitesTLS13 []uint16
 
-//go:linkname defaultCipherSuitesTLS13NoAES crypto/utls.defaultCipherSuitesTLS13NoAES
+//go:linkname defaultCipherSuitesTLS13NoAES github.com/refraction-networking/utls.defaultCipherSuitesTLS13NoAES
 var defaultCipherSuitesTLS13NoAES []uint16
 
 var cipherSuitesModified bool

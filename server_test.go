@@ -3,12 +3,13 @@ package quic
 import (
 	"context"
 	"crypto/rand"
-	"crypto/tls"
 	"errors"
 	"net"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	tls "github.com/refraction-networking/utls"
 
 	"golang.org/x/time/rate"
 
@@ -124,7 +125,7 @@ var _ = Describe("Server", func() {
 	It("errors when no tls.Config is given", func() {
 		_, err := ListenAddr("localhost:0", nil, nil)
 		Expect(err).To(HaveOccurred())
-		Expect(err.Error()).To(ContainSubstring("quic: tls.Config not set"))
+		Expect(err.Error()).To(ContainSubstring("quic: utls.Config not set"))
 	})
 
 	It("errors when the Config contains an invalid version", func() {

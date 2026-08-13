@@ -1,13 +1,14 @@
 package http09
 
 import (
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go"
 	"github.com/daeuniverse/quic-go/internal/testdata"

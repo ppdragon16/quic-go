@@ -3,7 +3,6 @@ package http3
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"errors"
 	"io"
 	"log/slog"
@@ -12,6 +11,8 @@ import (
 	"runtime"
 	"sync/atomic"
 	"time"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/daeuniverse/quic-go"
 	mockquic "github.com/daeuniverse/quic-go/internal/mocks/quic"

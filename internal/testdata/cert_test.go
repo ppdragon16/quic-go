@@ -1,9 +1,10 @@
 package testdata
 
 import (
-	"crypto/tls"
 	"io"
 	"testing"
+
+	tls "github.com/refraction-networking/utls"
 
 	"github.com/stretchr/testify/require"
 )

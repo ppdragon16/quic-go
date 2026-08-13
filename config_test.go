@@ -86,8 +86,10 @@ func configWithNonZeroNonFunctionFields(t *testing.T) *Config {
 		}
 
 		switch fn := typ.Field(i).Name; fn {
-		case "GetConfigForClient", "RequireAddressValidation", "GetLogWriter", "AllowConnectionWindowIncrease", "Tracer":
-			// Can't compare functions.
+		case "GetConfigForClient", "RequireAddressValidation", "GetLogWriter", "AllowConnectionWindowIncrease", "Tracer", "CapabilityCallback", "InitialCongestionControl":
+			// Functions can't be compared, and InitialCongestionControl has no
+			// built-in concrete implementation (it is provided by callers), so
+			// leave it nil here.
 		case "Versions":
 			f.Set(reflect.ValueOf([]Version{1, 2, 3}))
 		case "ConnectionIDLength":
