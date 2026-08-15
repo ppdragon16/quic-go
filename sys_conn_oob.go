@@ -218,6 +218,11 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 
 // WritePacket writes a new packet.
 func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gsoSize uint16, ecn protocol.ECN) (int, error) {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !ok {
+		return 0, errors.New("quic: oobConn.WritePacket: address is not a *net.UDPAddr")
+	}
+
 	oob := packetInfoOOB
 	if gsoSize > 0 {
 		if !c.capabilities().GSO {
@@ -230,20 +235,74 @@ func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gso
 			oob = appendUDPSegmentSizeMsg(oob, gsoSize)
 		}
 	}
+
+	// Marshal the remote address into a raw sockaddr on the stack. This avoids
+	// the per-send syscall.Sockaddr allocation that net.UDPConn.WriteMsgUDP
+	// performs via net.ipToSockaddr — the largest allocation source on the
+	// QUIC send path.
+	isIPv4 := udpAddr.IP.To4() != nil
+	var saBuf [28]byte // sockaddr_in6 is the largest sockaddr used here
+	salen, err := marshalSockaddr(saBuf[:], udpAddr, isIPv4)
+	if err != nil {
+		return 0, err
+	}
+
 	if ecn != protocol.ECNUnsupported {
 		if !c.capabilities().ECN {
 			panic("tried to send an ECN-marked packet although ECN is disabled")
 		}
-		if remoteUDPAddr, ok := addr.(*net.UDPAddr); ok {
-			if remoteUDPAddr.IP.To4() != nil {
-				oob = appendIPv4ECNMsg(oob, ecn)
-			} else {
-				oob = appendIPv6ECNMsg(oob, ecn)
-			}
+		if isIPv4 {
+			oob = appendIPv4ECNMsg(oob, ecn)
+		} else {
+			oob = appendIPv6ECNMsg(oob, ecn)
 		}
 	}
-	n, _, err := c.OOBCapablePacketConn.WriteMsgUDP(b, oob, addr.(*net.UDPAddr))
-	return n, err
+
+	var n int
+	err = c.rawConn.Write(func(fd uintptr) bool {
+		var werr error
+		n, werr = sendmsgRaw(int(fd), b, oob, saBuf[:salen])
+		return werr != syscall.EAGAIN && werr != syscall.EWOULDBLOCK
+	})
+	if err != nil {
+		return n, err
+	}
+	return n, nil
+}
+
+// marshalSockaddr marshals addr into buf as a raw sockaddr (sockaddr_in for
+// IPv4, sockaddr_in6 for IPv6) and returns the number of bytes written.
+func marshalSockaddr(buf []byte, addr *net.UDPAddr, isIPv4 bool) (int, error) {
+	if addr.Port < 0 || addr.Port > 0xFFFF {
+		return 0, errors.New("quic: invalid UDP port")
+	}
+	if isIPv4 {
+		ip4 := addr.IP.To4()
+		// sockaddr_in: family + port + addr + 8 bytes of zero padding.
+		binary.NativeEndian.PutUint16(buf[0:2], syscall.AF_INET)
+		binary.BigEndian.PutUint16(buf[2:4], uint16(addr.Port))
+		copy(buf[4:8], ip4)
+		return 16, nil
+	}
+	ip6 := addr.IP.To16()
+	if ip6 == nil {
+		return 0, errors.New("quic: invalid IP address")
+	}
+	var zoneID uint32
+	if addr.Zone != "" {
+		ifi, err := net.InterfaceByName(addr.Zone)
+		if err != nil {
+			return 0, err
+		}
+		zoneID = uint32(ifi.Index)
+	}
+	// sockaddr_in6: family + port + flowinfo + addr + scope_id.
+	binary.NativeEndian.PutUint16(buf[0:2], syscall.AF_INET6)
+	binary.BigEndian.PutUint16(buf[2:4], uint16(addr.Port))
+	// flowinfo (buf[4:8]) stays zero.
+	copy(buf[8:24], ip6)
+	binary.NativeEndian.PutUint32(buf[24:28], zoneID)
+	return 28, nil
 }
 
 func (c *oobConn) capabilities() connCapabilities {

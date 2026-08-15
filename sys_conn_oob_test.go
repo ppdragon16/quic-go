@@ -5,6 +5,7 @@ package quic
 import (
 	"fmt"
 	"net"
+	"syscall"
 	"testing"
 	"time"
 
@@ -261,16 +262,6 @@ func TestSysConnPacketInfoDualStack(t *testing.T) {
 	}
 }
 
-type oobRecordingConn struct {
-	*net.UDPConn
-	oobs [][]byte
-}
-
-func (c *oobRecordingConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error) {
-	c.oobs = append(c.oobs, oob)
-	return c.UDPConn.WriteMsgUDP(b, oob, addr)
-}
-
 // mockOOBRead simulates the platform-specific batch reader to exercise the
 // shared oobConn.ReadPacket batch/refill logic without touching a real socket.
 type mockOOBRead struct {
@@ -307,25 +298,58 @@ func TestOOBConnMultipleBatches(t *testing.T) {
 	require.Equal(t, []int{0, msgsPerBatch}, r.refills)
 }
 
-func TestSysConnSendGSO(t *testing.T) {
-	if !platformSupportsGSO {
-		t.Skip("GSO not supported on this platform")
+func TestOOBConnWritePacket(t *testing.T) {
+	testCases := []struct {
+		name    string
+		network string
+		ip      net.IP
+	}{
+		{"IPv4", "udp4", net.IPv4(127, 0, 0, 1)},
+		{"IPv6", "udp6", net.IPv6loopback},
 	}
 
-	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 0})
-	require.NoError(t, err)
-	c := &oobRecordingConn{UDPConn: udpConn}
-	oobConn, err := newConn(c, true)
-	require.NoError(t, err)
-	require.True(t, oobConn.capabilities().GSO)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			server, err := net.ListenUDP(tc.network, &net.UDPAddr{IP: tc.ip, Port: 0})
+			require.NoError(t, err)
+			t.Cleanup(func() { server.Close() })
 
-	oob := make([]byte, 0, 123)
-	oobConn.WritePacket([]byte("foobar"), udpConn.LocalAddr(), oob, 3, protocol.ECNCE)
-	require.Len(t, c.oobs, 1)
-	oobMsg := c.oobs[0]
-	require.NotEmpty(t, oobMsg)
-	require.Equal(t, cap(oob), cap(oobMsg)) // check that it appended to oob
-	expected := appendUDPSegmentSizeMsg([]byte{}, 3)
-	// Check that the first control message is the OOB control message.
-	require.Equal(t, expected, oobMsg[:len(expected)])
+			client, err := net.ListenUDP(tc.network, &net.UDPAddr{IP: tc.ip, Port: 0})
+			require.NoError(t, err)
+			t.Cleanup(func() { client.Close() })
+
+			oobConn, err := newConn(client, true)
+			require.NoError(t, err)
+
+			n, err := oobConn.WritePacket([]byte("foobar"), server.LocalAddr(), nil, 0, protocol.ECNUnsupported)
+			require.NoError(t, err)
+			require.Equal(t, 6, n)
+
+			buf := make([]byte, 1500)
+			n, remote, err := server.ReadFrom(buf)
+			require.NoError(t, err)
+			require.Equal(t, []byte("foobar"), buf[:n])
+			require.Equal(t, client.LocalAddr().String(), remote.String())
+		})
+	}
+}
+
+func TestAppendECNMsgs(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		append func([]byte, protocol.ECN) []byte
+		level  int
+		typ    int
+	}{
+		{"IPv4", appendIPv4ECNMsg, syscall.IPPROTO_IP, unix.IP_TOS},
+		{"IPv6", appendIPv6ECNMsg, syscall.IPPROTO_IPV6, unix.IPV6_TCLASS},
+	} {
+		oob := tc.append(nil, protocol.ECNCE)
+		require.NotEmpty(t, oob)
+		hdr, body, _, err := unix.ParseOneSocketControlMessage(oob)
+		require.NoError(t, err)
+		require.Equal(t, tc.level, int(hdr.Level))
+		require.Equal(t, tc.typ, int(hdr.Type))
+		require.Equal(t, protocol.ECNCE.ToHeaderBits(), body[0])
+	}
 }
