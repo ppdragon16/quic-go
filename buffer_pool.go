@@ -21,7 +21,7 @@ type packetBuffer struct {
 	// It shares the lifecycle of the packetBuffer: when the buffer goes back
 	// to the pool (via putBack), the addr is also returned to an addr pool.
 	// The *net.UDPAddr is recycled and its IP backing array is pre-allocated
-	// in addrPool.New, so filling from netip.AddrPort requires no allocation.
+	// (16 bytes), so filling from netip.AddrPort requires no allocation.
 	addr *net.UDPAddr
 }
 
@@ -66,7 +66,13 @@ func (b *packetBuffer) Cap() protocol.ByteCount { return protocol.ByteCount(cap(
 
 func (b *packetBuffer) putBack() {
 	if b.addr != nil {
-		addrPool.Put(b.addr)
+		// Only pool addresses whose IP backing array is large enough to be
+		// refilled for both IPv4 and IPv6 (fillAddrFromPort needs cap >= 16).
+		// Addresses sourced from x/net or the stdlib on the non-OOB paths may
+		// have a 4-byte backing array; those are dropped and GC'd instead.
+		if cap(b.addr.IP) >= net.IPv6len {
+			addrPool.put(b.addr)
+		}
 		b.addr = nil
 	}
 	if cap(b.Data) == protocol.MaxPacketBufferSize {
@@ -81,13 +87,11 @@ func (b *packetBuffer) putBack() {
 }
 
 // bufferPool and largeBufferPool retain packet buffers of the normal and
-// GSO-sized capacities, respectively. They are GC-surviving (see
-// packetBufferPool) so a GC pass does not evict the working set of receive
-// buffers and force a fresh allocation of their (relatively large) backing
-// arrays.
-var bufferPool, largeBufferPool *packetBufferPool
-
-var addrPool sync.Pool
+// GSO-sized capacities, respectively; addrPool retains *net.UDPAddr. They are
+// all GC-surviving (see ringPool) so a GC pass does not evict the working set
+// of receive buffers/addresses and force fresh allocations.
+var bufferPool, largeBufferPool *ringPool[*packetBuffer]
+var addrPool *ringPool[*net.UDPAddr]
 
 func getPacketBuffer() *packetBuffer {
 	buf := bufferPool.get()
@@ -106,15 +110,15 @@ func getLargePacketBuffer() *packetBuffer {
 }
 
 // getPooledAddr returns a *net.UDPAddr from the addr pool, populated from addrPort.
-// The IP backing array is pre-allocated by addrPool.New (16 bytes), so no allocation.
+// The IP backing array is pre-allocated (16 bytes), so no allocation.
 func getPooledAddr(addrPort netip.AddrPort) *net.UDPAddr {
-	addr := addrPool.Get().(*net.UDPAddr)
+	addr := addrPool.get()
 	fillAddrFromPort(addr, addrPort)
 	return addr
 }
 
 // fillAddrFromPort fills a *net.UDPAddr from netip.AddrPort.
-// addr.IP must have cap >= 16, which is guaranteed by addrPool.New.
+// addr.IP must have cap >= 16, which is guaranteed by the addr pool.
 func fillAddrFromPort(addr *net.UDPAddr, addrPort netip.AddrPort) {
 	a := addrPort.Addr()
 	if a.Is4() {
@@ -133,120 +137,125 @@ func fillAddrFromPort(addr *net.UDPAddr, addrPort netip.AddrPort) {
 }
 
 const (
-	// packetBufferByteBudget caps how many bytes each packet-buffer pool may
+	// poolTTL is how long a released object may sit idle in a ring before a
+	// background sweeper demotes it to the GC-cleared overflow pool, so an idle
+	// process does not hold onto peak memory forever.
+	poolTTL = 3 * time.Minute
+
+	// poolSweepBatch caps how many expired entries the sweeper demotes from one
+	// ring per pass, so it never holds a ring's lock long enough to stall
+	// get/put. Leftover expired entries are drained on later passes.
+	poolSweepBatch = 512
+
+	// packetBufferByteBudget caps how many bytes each packet-buffer ring may
 	// retain across GCs (8 MiB, mirroring the outbound/pool budget).
 	packetBufferByteBudget = 8 << 20
 
-	// packetBufferTTL is how long a released buffer may sit idle in the ring
-	// before a background sweeper demotes it to the GC-cleared overflow pool,
-	// so an idle process does not hold onto peak memory forever.
-	packetBufferTTL = 3 * time.Minute
-
-	// packetBufferSweepBatch caps how many expired entries the sweeper demotes
-	// from one pool per pass, so it never holds a ring's lock long enough to
-	// stall get/put. Leftover expired entries are drained on later passes.
-	packetBufferSweepBatch = 512
+	// addrRingCapacity caps how many pooled addresses the addr ring retains
+	// across GCs (~4096 × ~56 B ≈ 229 KiB).
+	addrRingCapacity = 4096
 )
 
-// bufEntry is a pooled buffer plus the time it was returned to the pool.
-type bufEntry struct {
-	ptr     *packetBuffer
+// ringEntry is a pooled object plus the time it was returned to the pool.
+type ringEntry[T any] struct {
+	v       T
 	putTime time.Time
 }
 
-// packetBufferPool is a bounded, GC-surviving LIFO ring of *packetBuffer with
-// a GC-cleared sync.Pool overflow.
+// ringPool is a bounded, GC-surviving LIFO ring of T with a GC-cleared
+// sync.Pool overflow.
 //
 // Unlike a plain sync.Pool it is not cleared by the GC: the ring keeps the
-// steady-state working set of receive buffers alive across GC cycles, avoiding
-// the allocation spiral where every GC pass evicts the buffers and the next
-// packets each re-allocate a fresh MaxPacketBufferSize backing array. The ring
-// is bounded by a byte budget and the sweeper evicts idle entries (in O(1)
-// from the head) so a quiescent process eventually releases its peak memory.
+// steady-state working set alive across GC cycles, avoiding the allocation
+// spiral where every GC pass evicts the objects and the next users each
+// re-allocate a fresh one. The ring is bounded (by capacity) and the sweeper
+// evicts idle entries (in O(1) from the head) so a quiescent process
+// eventually releases its peak memory.
 //
 // get pops the newest entry (LIFO) for cache locality and so a low-rate
-// trickle only keeps the few most-recent buffers warm: with LIFO the deeper
+// trickle only keeps the few most-recent objects warm: with LIFO the deeper
 // (oldest) entries age out untouched and are reclaimed by the sweeper.
-type packetBufferPool struct {
-	newFn func() *packetBuffer
+type ringPool[T any] struct {
+	newFn func() T
 
 	spool sync.Pool // GC-cleared overflow: ring misses / evictions
 
 	mu   sync.Mutex
-	buf  []bufEntry // fixed size == cap == max (a power of two)
-	head int        // index of the oldest entry
-	n    int        // number of live entries
+	buf  []ringEntry[T] // fixed size == cap == capacity (a power of two)
+	head int            // index of the oldest entry
+	n    int            // number of live entries
 	mask int
 }
 
-// newPacketBufferPool creates a pool with a ring of the given capacity.
-func newPacketBufferPool(newFn func() *packetBuffer, capacity int) *packetBufferPool {
-	return &packetBufferPool{
+// newRingPool creates a pool with a ring of the given capacity (must be a power of two).
+func newRingPool[T any](newFn func() T, capacity int) *ringPool[T] {
+	return &ringPool[T]{
 		newFn: newFn,
-		buf:   make([]bufEntry, capacity),
+		buf:   make([]ringEntry[T], capacity),
 		mask:  capacity - 1,
 	}
 }
 
-// get returns a buffer from the ring, the overflow pool, or a fresh allocation.
-func (p *packetBufferPool) get() *packetBuffer {
-	if b := p.pop(); b != nil {
-		return b
+// get returns an object from the ring, the overflow pool, or a fresh allocation.
+func (p *ringPool[T]) get() T {
+	if v, ok := p.pop(); ok {
+		return v
 	}
 	if v := p.spool.Get(); v != nil {
-		return v.(*packetBuffer)
+		return v.(T)
 	}
 	return p.newFn()
 }
 
-// pop removes and returns the newest (LIFO) buffer, or nil if the ring is empty.
-func (p *packetBufferPool) pop() *packetBuffer {
+// pop removes and returns the newest (LIFO) object, or false if the ring is empty.
+func (p *ringPool[T]) pop() (T, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.n == 0 {
-		return nil
+		var zero T
+		return zero, false
 	}
 	idx := (p.head + p.n - 1) & p.mask
 	e := p.buf[idx]
-	p.buf[idx] = bufEntry{}
+	p.buf[idx] = ringEntry[T]{}
 	p.n--
-	return e.ptr
+	return e.v, true
 }
 
-// put returns b to the ring, or to the overflow pool if the ring is full.
-func (p *packetBufferPool) put(b *packetBuffer) {
+// put returns v to the ring, or to the overflow pool if the ring is full.
+func (p *ringPool[T]) put(v T) {
 	now := time.Now()
 	p.mu.Lock()
 	if p.n == len(p.buf) {
 		// Ring full. Reuse the head slot only if its entry has already
 		// expired — entries are inserted in time order so the head is the
-		// oldest. The replaced buffer is demoted to the GC-cleared overflow,
+		// oldest. The replaced object is demoted to the GC-cleared overflow,
 		// same as the sweeper, so it stays reusable until GC.
-		if now.Sub(p.buf[p.head].putTime) > packetBufferTTL {
-			p.spool.Put(p.buf[p.head].ptr)
-			p.buf[p.head] = bufEntry{ptr: b, putTime: now}
+		if now.Sub(p.buf[p.head].putTime) > poolTTL {
+			p.spool.Put(p.buf[p.head].v)
+			p.buf[p.head] = ringEntry[T]{v: v, putTime: now}
 			p.head = (p.head + 1) & p.mask
 			p.mu.Unlock()
 			return
 		}
 		p.mu.Unlock()
-		p.spool.Put(b)
+		p.spool.Put(v)
 		return
 	}
-	p.buf[(p.head+p.n)&p.mask] = bufEntry{ptr: b, putTime: now}
+	p.buf[(p.head+p.n)&p.mask] = ringEntry[T]{v: v, putTime: now}
 	p.n++
 	p.mu.Unlock()
 }
 
 // sweep demotes entries that have sat idle since before expiredBefore from the
-// ring into the GC-cleared overflow pool. It drains at most packetBufferSweepBatch
+// ring into the GC-cleared overflow pool. It drains at most poolSweepBatch
 // entries per call so the ring lock is never held for long.
-func (p *packetBufferPool) sweep(expiredBefore time.Time) {
+func (p *ringPool[T]) sweep(expiredBefore time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for i := 0; i < packetBufferSweepBatch && p.n > 0 && p.buf[p.head].putTime.Before(expiredBefore); i++ {
-		p.spool.Put(p.buf[p.head].ptr)
-		p.buf[p.head] = bufEntry{}
+	for i := 0; i < poolSweepBatch && p.n > 0 && p.buf[p.head].putTime.Before(expiredBefore); i++ {
+		p.spool.Put(p.buf[p.head].v)
+		p.buf[p.head] = ringEntry[T]{}
 		p.head = (p.head + 1) & p.mask
 		p.n--
 	}
@@ -265,26 +274,27 @@ func ringCapacity(bufSize int) int {
 }
 
 func init() {
-	bufferPool = newPacketBufferPool(func() *packetBuffer {
+	bufferPool = newRingPool(func() *packetBuffer {
 		return &packetBuffer{Data: make([]byte, 0, protocol.MaxPacketBufferSize)}
 	}, ringCapacity(protocol.MaxPacketBufferSize))
-	largeBufferPool = newPacketBufferPool(func() *packetBuffer {
+	largeBufferPool = newRingPool(func() *packetBuffer {
 		return &packetBuffer{Data: make([]byte, 0, protocol.MaxLargePacketBufferSize)}
 	}, ringCapacity(protocol.MaxLargePacketBufferSize))
-	addrPool.New = func() any {
+	addrPool = newRingPool(func() *net.UDPAddr {
 		return &net.UDPAddr{IP: make([]byte, 16)}
-	}
+	}, addrRingCapacity)
 
-	// Background sweeper: periodically demote expired buffers from each ring
+	// Background sweeper: periodically demote expired objects from each ring
 	// into the GC-cleared overflow pool, so an idle process's peak memory is
 	// actually released on the next GC.
 	go func() {
-		t := time.NewTicker(packetBufferTTL / 2)
+		t := time.NewTicker(poolTTL / 2)
 		defer t.Stop()
 		for range t.C {
-			expiredBefore := time.Now().Add(-packetBufferTTL)
+			expiredBefore := time.Now().Add(-poolTTL)
 			bufferPool.sweep(expiredBefore)
 			largeBufferPool.sweep(expiredBefore)
+			addrPool.sweep(expiredBefore)
 		}
 	}()
 }
