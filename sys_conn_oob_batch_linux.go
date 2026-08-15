@@ -9,6 +9,8 @@ import (
 	"syscall"
 	"unsafe"
 
+	"golang.org/x/sys/unix"
+
 	"github.com/daeuniverse/quic-go/internal/protocol"
 )
 
@@ -19,11 +21,11 @@ import (
 const sockaddrBufSize = 128
 
 // mmsghdr mirrors the kernel's struct mmsghdr: a struct msghdr followed by a
-// msg_len. We reuse syscall.Msghdr (already correct per-arch, including its
+// msg_len. We reuse unix.Msghdr (already correct per-arch, including its
 // padding) and rely on Go's own trailing padding to match the C layout, which
 // holds on both 32- and 64-bit: struct mmsghdr == struct msghdr + uint32.
 type mmsghdr struct {
-	Hdr syscall.Msghdr
+	Hdr unix.Msghdr
 	Len uint32
 }
 
@@ -43,7 +45,7 @@ func recvmmsg(fd int, hs []mmsghdr, flags int) (int, error) {
 // sockaddrToPooledAddr).
 type linuxOOBRead struct {
 	hs        [batchSize]mmsghdr
-	iovs      [batchSize]syscall.Iovec
+	iovs      [batchSize]unix.Iovec
 	sockaddrs [batchSize][sockaddrBufSize]byte
 	oob       [batchSize][oobBufferSize]byte
 }
@@ -73,11 +75,11 @@ func (r *linuxOOBRead) read(c *oobConn, refill int) (int, error) {
 		hdr.Name = (*byte)(unsafe.Pointer(sa))
 		hdr.Namelen = sockaddrBufSize
 		hdr.Iov = &r.iovs[i]
-		hdr.Iovlen = 1
+		hdr.SetIovlen(1)
 		r.iovs[i].Base = &buffer.Data[0]
-		r.iovs[i].Len = uint64(len(buffer.Data))
+		r.iovs[i].SetLen(len(buffer.Data))
 		hdr.Control = &r.oob[i][0]
-		hdr.Controllen = uint64(len(r.oob[i]))
+		hdr.SetControllen(len(r.oob[i]))
 		hdr.Flags = 0
 		r.hs[i].Len = 0
 	}
