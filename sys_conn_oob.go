@@ -345,9 +345,23 @@ func (info *packetInfo) OOB() []byte {
 	return nil
 }
 
+// appendCmsgSpace appends unix.CmsgSpace(dataLen) zero bytes to b, avoiding the
+// intermediate make([]byte, ...) allocation of the naive append idiom when b
+// has spare capacity. It falls back to append+make only when b must grow.
+func appendCmsgSpace(b []byte, dataLen int) []byte {
+	n := unix.CmsgSpace(dataLen)
+	if cap(b)-len(b) < n {
+		return append(b, make([]byte, n)...)
+	}
+	start := len(b)
+	b = b[:start+n]
+	clear(b[start:])
+	return b
+}
+
 func appendIPv4ECNMsg(b []byte, val protocol.ECN) []byte {
 	startLen := len(b)
-	b = append(b, make([]byte, unix.CmsgSpace(ecnIPv4DataLen))...)
+	b = appendCmsgSpace(b, ecnIPv4DataLen)
 	h := (*unix.Cmsghdr)(unsafe.Pointer(&b[startLen]))
 	h.Level = syscall.IPPROTO_IP
 	h.Type = unix.IP_TOS
@@ -362,7 +376,7 @@ func appendIPv4ECNMsg(b []byte, val protocol.ECN) []byte {
 func appendIPv6ECNMsg(b []byte, val protocol.ECN) []byte {
 	startLen := len(b)
 	const dataLen = 4
-	b = append(b, make([]byte, unix.CmsgSpace(dataLen))...)
+	b = appendCmsgSpace(b, dataLen)
 	h := (*unix.Cmsghdr)(unsafe.Pointer(&b[startLen]))
 	h.Level = syscall.IPPROTO_IPV6
 	h.Type = unix.IPV6_TCLASS
