@@ -225,6 +225,7 @@ func (s *receiveStream) readImpl(p []byte) (hasStreamWindowUpdate bool, hasConnW
 			s.currentFrame = nil
 			if s.currentFrameFrame != nil {
 				s.currentFrameFrame.PutBack()
+				s.currentFrameFrame = nil
 			}
 			s.errorRead = true
 			return hasStreamWindowUpdate, hasConnWindowUpdate, bytesRead, io.EOF
@@ -267,6 +268,7 @@ func (s *receiveStream) cancelReadImpl(errorCode qerr.StreamErrorCode) (queuedNe
 		return false
 	}
 	s.cancelledLocally = true
+	s.releaseBufferedFrames()
 	if s.errorRead || s.cancelledRemotely {
 		return false
 	}
@@ -290,14 +292,20 @@ func (s *receiveStream) handleStreamFrame(frame *wire.StreamFrame, now time.Time
 }
 
 func (s *receiveStream) handleStreamFrameImpl(frame *wire.StreamFrame, now time.Time) error {
+	if s.closeForShutdownErr != nil {
+		frame.PutBack()
+		return nil
+	}
 	maxOffset := frame.Offset + frame.DataLen()
 	if err := s.flowController.UpdateHighestReceived(maxOffset, frame.Fin, now); err != nil {
+		frame.PutBack()
 		return err
 	}
 	if frame.Fin {
 		s.finalOffset = maxOffset
 	}
-	if s.cancelledLocally {
+	if s.cancelledLocally || s.cancelledRemotely {
+		frame.PutBack()
 		return nil
 	}
 	if err := s.frameQueue.Push(frame.Data, frame.Offset, frame); err != nil {
@@ -310,6 +318,7 @@ func (s *receiveStream) handleStreamFrameImpl(frame *wire.StreamFrame, now time.
 func (s *receiveStream) handleResetStreamFrame(frame *wire.ResetStreamFrame, now time.Time) error {
 	s.mutex.Lock()
 	err := s.handleResetStreamFrameImpl(frame, now)
+	s.releaseBufferedFrames()
 	completed := s.isNewlyCompleted()
 	s.mutex.Unlock()
 
@@ -374,12 +383,25 @@ func (s *receiveStream) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
+// releaseBufferedFrames returns every pooled buffer still held by this stream
+// to the pool: the frame currently being read plus all frames buffered in the
+// frame sorter. Callers must hold s.mutex.
+func (s *receiveStream) releaseBufferedFrames() {
+	if s.currentFrameFrame != nil {
+		s.currentFrameFrame.PutBack()
+		s.currentFrameFrame = nil
+	}
+	s.currentFrame = nil
+	s.frameQueue.Release()
+}
+
 // CloseForShutdown closes a stream abruptly.
 // It makes Read unblock (and return the error) immediately.
 // The peer will NOT be informed about this: the stream is closed without sending a FIN or RESET.
 func (s *receiveStream) closeForShutdown(err error) {
 	s.mutex.Lock()
 	s.closeForShutdownErr = err
+	s.releaseBufferedFrames()
 	s.mutex.Unlock()
 	s.signalRead()
 }

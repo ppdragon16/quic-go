@@ -129,6 +129,17 @@ func (q *fastQueue) pop(readPos protocol.ByteCount) (frameEntry, bool) {
 	return e, true
 }
 
+// drain calls fn on every queued entry and empties the queue. It is used by
+// Release to return the pooled data buffers of buffered frames.
+func (q *fastQueue) drain(fn func(frameEntry)) {
+	for i := 0; i < q.len; i++ {
+		fn(q.buf[(q.write+i)%seqBufCap])
+	}
+	q.write = 0
+	q.len = 0
+	q.end = 0
+}
+
 // drainTo drains all entries into the chunk list, returning the new head.
 func (q *fastQueue) drainTo(head *frameChunk) *frameChunk {
 	if q.len == 0 {
@@ -594,6 +605,30 @@ func (s *frameSorter2) Pop() (protocol.ByteCount, []byte, *wire.StreamFrame) {
 		s.tryMergeWithNext(s.head)
 	}
 	return offset, entryData, entryFrame
+}
+
+// Release drops every buffered entry and returns each frame's pooled data
+// buffer to the pool. It is called when the owning receive stream is closed or
+// cancelled while frames are still buffered, so those buffers are not leaked.
+// The sorter must not be used after Release.
+func (s *frameSorter2) Release() {
+	s.queue.drain(func(e frameEntry) {
+		if e.frame != nil {
+			e.frame.PutBack()
+		}
+	})
+	for c := s.head; c != nil; {
+		next := c.next
+		for i := 0; i < c.len; i++ {
+			if e := c.entry(i); e.frame != nil {
+				e.frame.PutBack()
+			}
+		}
+		freeChunk(c)
+		c = next
+	}
+	s.head = nil
+	s.gapCount = 1
 }
 
 // HasMoreData says if there is any more data queued at *any* offset.
