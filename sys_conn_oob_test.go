@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/net/ipv4"
 	"golang.org/x/sys/unix"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
@@ -272,42 +271,40 @@ func (c *oobRecordingConn) WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oob
 	return c.UDPConn.WriteMsgUDP(b, oob, addr)
 }
 
-type mockBatchConn struct {
-	t          *testing.T
-	numMsgRead int
-
-	callCounter int
+// mockOOBRead simulates the platform-specific batch reader to exercise the
+// shared oobConn.ReadPacket batch/refill logic without touching a real socket.
+type mockOOBRead struct {
+	n         int // datagrams per batch
+	callCount int
+	refills   []int
 }
 
-var _ batchConn = &mockBatchConn{}
-
-func (c *mockBatchConn) ReadBatch(ms []ipv4.Message, _ int) (int, error) {
-	require.Len(c.t, ms, batchSize)
-	for i := 0; i < c.numMsgRead; i++ {
-		require.Len(c.t, ms[i].Buffers, 1)
-		require.Len(c.t, ms[i].Buffers[0], protocol.MaxPacketBufferSize)
-		data := []byte(fmt.Sprintf("message %d", c.callCounter*c.numMsgRead+i))
-		ms[i].Buffers[0] = data
-		ms[i].N = len(data)
+func (m *mockOOBRead) read(c *oobConn, refill int) (int, error) {
+	batch := m.callCount
+	m.callCount++
+	m.refills = append(m.refills, refill)
+	for i := 0; i < m.n; i++ {
+		c.buffers[i] = &packetBuffer{Data: []byte(fmt.Sprintf("message %d", batch*m.n+i))}
 	}
-	c.callCounter++
-	return c.numMsgRead, nil
+	return m.n, nil
 }
 
-func TestReadsMultipleMessagesInOneBatch(t *testing.T) {
-	bc := &mockBatchConn{t: t, numMsgRead: batchSize/2 + 1}
+func (m *mockOOBRead) datagram(c *oobConn, i int) (payload, oob []byte, addr *net.UDPAddr) {
+	return c.buffers[i].Data, nil, nil
+}
 
-	udpConn := newUPDConnLocalhost(t)
-	oobConn, err := newConn(udpConn, true)
-	require.NoError(t, err)
-	oobConn.batchConn = bc
+func TestOOBConnMultipleBatches(t *testing.T) {
+	msgsPerBatch := batchSize/2 + 1
+	r := &mockOOBRead{n: msgsPerBatch}
+	c := &oobConn{read: r}
 
 	for i := 0; i < batchSize+1; i++ {
-		p, err := oobConn.ReadPacket()
+		p, err := c.ReadPacket()
 		require.NoError(t, err)
 		require.Equal(t, fmt.Sprintf("message %d", i), string(p.data))
 	}
-	require.Equal(t, 2, bc.callCounter)
+	require.Equal(t, 2, r.callCount)
+	require.Equal(t, []int{0, msgsPerBatch}, r.refills)
 }
 
 func TestSysConnSendGSO(t *testing.T) {

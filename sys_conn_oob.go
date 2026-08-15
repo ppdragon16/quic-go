@@ -28,15 +28,6 @@ const (
 	oobBufferSize = 128
 )
 
-// Contrary to what the naming suggests, the ipv{4,6}.Message is not dependent on the IP version.
-// They're both just aliases for x/net/internal/socket.Message.
-// This means we can use this struct to read from a socket that receives both IPv4 and IPv6 messages.
-var _ ipv4.Message = ipv6.Message{}
-
-type batchConn interface {
-	ReadBatch(ms []ipv4.Message, flags int) (int, error)
-}
-
 func inspectReadBuffer(c syscall.RawConn) (int, error) {
 	var size int
 	var serr error
@@ -64,14 +55,31 @@ func isECNDisabledUsingEnv() bool {
 	return err == nil && disabled
 }
 
+// oobReadState is the platform-specific batched-receive machinery of an
+// oobConn. It owns everything that differs between implementations: on Linux
+// it is a direct recvmmsg loop that parses raw sockaddr bytes into a pooled
+// *net.UDPAddr (no per-packet allocation), and elsewhere it is the x/net
+// ReadBatch path.
+type oobReadState interface {
+	// read refills the `refill` most-recently-consumed buffer slots with fresh
+	// packet buffers, issues one batched read, and returns the number of
+	// datagrams received.
+	read(c *oobConn, refill int) (int, error)
+	// datagram returns the payload, received control-message bytes, and the
+	// remote address of the i-th received datagram (0 <= i < n). It stores the
+	// address on the packet buffer so it is recycled when the buffer is
+	// released.
+	datagram(c *oobConn, i int) (payload, oob []byte, addr *net.UDPAddr)
+}
+
 type oobConn struct {
 	OOBCapablePacketConn
-	batchConn batchConn
+	rawConn syscall.RawConn
 
-	readPos uint8
-	// Packets received from the kernel, but not yet returned by ReadPacket().
-	messages []ipv4.Message
+	readPos  uint8
+	msgCount int
 	buffers  [batchSize]*packetBuffer
+	read     oobReadState
 
 	cap connCapabilities
 }
@@ -125,34 +133,15 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 		}
 	}
 
-	// Allows callers to pass in a connection that already satisfies batchConn interface
-	// to make use of the optimisation. Otherwise, ipv4.NewPacketConn would unwrap the file descriptor
-	// via SyscallConn(), and read it that way, which might not be what the caller wants.
-	var bc batchConn
-	if ibc, ok := c.(batchConn); ok {
-		bc = ibc
-	} else {
-		bc = ipv4.NewPacketConn(c)
-	}
-
-	msgs := make([]ipv4.Message, batchSize)
-	for i := range msgs {
-		// preallocate the [][]byte
-		msgs[i].Buffers = make([][]byte, 1)
-	}
 	oobConn := &oobConn{
 		OOBCapablePacketConn: c,
-		batchConn:            bc,
-		messages:             msgs,
-		readPos:              batchSize,
+		rawConn:              rawConn,
+		read:                 newOOBReadState(c),
 		cap: connCapabilities{
 			DF:  supportsDF,
 			GSO: isGSOEnabled(rawConn),
 			ECN: isECNEnabled(),
 		},
-	}
-	for i := 0; i < batchSize; i++ {
-		oobConn.messages[i].OOB = make([]byte, oobBufferSize)
 	}
 	return oobConn, nil
 }
@@ -160,43 +149,28 @@ func newConn(c OOBCapablePacketConn, supportsDF bool) (*oobConn, error) {
 var invalidCmsgOnceV4, invalidCmsgOnceV6 sync.Once
 
 func (c *oobConn) ReadPacket() (receivedPacket, error) {
-	if len(c.messages) == int(c.readPos) { // all messages read. Read the next batch of messages.
-		c.messages = c.messages[:batchSize]
-		// replace buffers data buffers up to the packet that has been consumed during the last ReadBatch call
-		for i := uint8(0); i < c.readPos; i++ {
-			buffer := getPacketBuffer()
-			buffer.Data = buffer.Data[:protocol.MaxPacketBufferSize]
-			c.buffers[i] = buffer
-			c.messages[i].Buffers[0] = c.buffers[i].Data
-		}
-		c.readPos = 0
-
-		n, err := c.batchConn.ReadBatch(c.messages, 0)
+	if int(c.readPos) == c.msgCount { // all messages read. Read the next batch of messages.
+		n, err := c.read.read(c, int(c.readPos))
 		if n == 0 || err != nil {
 			return receivedPacket{}, err
 		}
-		c.messages = c.messages[:n]
+		c.msgCount = n
+		c.readPos = 0
 	}
 
-	msg := c.messages[c.readPos]
-	buffer := c.buffers[c.readPos]
+	i := int(c.readPos)
+	payload, oob, addr := c.read.datagram(c, i)
+	buffer := c.buffers[i]
 	c.readPos++
 
-	// Store the *net.UDPAddr (allocated by ReadBatch) in the buffer
-	// so it gets recycled via the addr pool when the buffer is released.
-	if udpAddr, ok := msg.Addr.(*net.UDPAddr); ok {
-		buffer.addr = udpAddr
-	}
-
-	data := msg.OOB[:msg.NN]
 	p := receivedPacket{
-		remoteAddr: buffer.addr,
+		remoteAddr: addr,
 		rcvTime:    time.Now(),
-		data:       msg.Buffers[0][:msg.N],
+		data:       payload,
 		buffer:     buffer,
 	}
-	for len(data) > 0 {
-		hdr, body, remainder, err := unix.ParseOneSocketControlMessage(data)
+	for len(oob) > 0 {
+		hdr, body, remainder, err := unix.ParseOneSocketControlMessage(oob)
 		if err != nil {
 			return receivedPacket{}, err
 		}
@@ -237,7 +211,7 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 				}
 			}
 		}
-		data = remainder
+		oob = remainder
 	}
 	return p, nil
 }
