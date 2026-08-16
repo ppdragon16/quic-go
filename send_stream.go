@@ -352,7 +352,11 @@ func (s *sendStream) maybeGetRetransmission(maxBytes protocol.ByteCount, v proto
 	if needsSplit {
 		return newFrame, true
 	}
-	s.retransmissionQueue = s.retransmissionQueue[1:]
+	// Compact to the front instead of reslicing with [1:], so the backing
+	// array keeps its capacity and OnLost's append doesn't reallocate.
+	copy(s.retransmissionQueue, s.retransmissionQueue[1:])
+	clear(s.retransmissionQueue[len(s.retransmissionQueue)-1:])
+	s.retransmissionQueue = s.retransmissionQueue[:len(s.retransmissionQueue)-1]
 	return f, len(s.retransmissionQueue) > 0
 }
 

@@ -62,8 +62,10 @@ func (h *sentPacketHistory) SentAckElicitingPacket(p *packet) {
 
 // Iterate iterates through all packets.
 func (h *sentPacketHistory) Iterate(cb func(*packet) (cont bool, err error)) error {
-	for _, p := range h.packets {
+	for i := 0; i < len(h.packets); {
+		p := h.packets[i]
 		if p == nil {
+			i++
 			continue
 		}
 		cont, err := cb(p)
@@ -72,6 +74,12 @@ func (h *sentPacketHistory) Iterate(cb func(*packet) (cont bool, err error)) err
 		}
 		if !cont {
 			return nil
+		}
+		// The callback may have removed p and compacted the slice via
+		// copy-to-head (cleanupStart), shifting the next packet into index i.
+		// Only advance when p is still at index i; otherwise revisit it.
+		if i < len(h.packets) && h.packets[i] == p {
+			i++
 		}
 	}
 	return nil
@@ -149,7 +157,13 @@ func (h *sentPacketHistory) HasOutstandingPackets() bool {
 func (h *sentPacketHistory) cleanupStart() {
 	for i, p := range h.packets {
 		if p != nil {
-			h.packets = h.packets[i:]
+			// Compact to the front instead of reslicing with [i:], so the
+			// backing array keeps its full capacity and the next append
+			// doesn't reallocate (head-drift would otherwise exhaust cap).
+			// Iterate() is aware of this in-place compaction.
+			copy(h.packets, h.packets[i:])
+			clear(h.packets[len(h.packets)-i:])
+			h.packets = h.packets[:len(h.packets)-i]
 			return
 		}
 	}

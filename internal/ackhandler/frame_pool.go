@@ -63,7 +63,7 @@ const (
 )
 
 var (
-	framesPool       = newSlicePool(func() []Frame { return make([]Frame, 0, 4) }, frameSlicePoolMin, frameSlicePoolMax)
+	framesPool       = newSlicePool(func() []Frame { return make([]Frame, 0, 8) }, frameSlicePoolMin, frameSlicePoolMax)
 	streamFramesPool = newSlicePool(func() []StreamFrame { return make([]StreamFrame, 0, 8) }, frameSlicePoolMin, frameSlicePoolMax)
 )
 
