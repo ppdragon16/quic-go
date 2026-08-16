@@ -1954,6 +1954,7 @@ func (s *connection) sendPacketsWithoutGSO(now time.Time) error {
 				buf.Release()
 				return nil
 			}
+			buf.Release()
 			return err
 		}
 
@@ -1997,6 +1998,7 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 			size, err := s.appendOneShortHeaderPacket(buf, maxSize, ecn, now)
 			if err != nil {
 				if err != errNothingToPack {
+					buf.Release()
 					return err
 				}
 				if buf.Len() == 0 {
