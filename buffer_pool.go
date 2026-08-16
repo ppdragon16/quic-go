@@ -4,7 +4,9 @@ import (
 	"net"
 	"net/netip"
 	"sync"
+	"sync/atomic"
 	"time"
+	"unsafe"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
 )
@@ -185,25 +187,44 @@ type ringPool[T any] struct {
 	head int            // index of the oldest entry
 	n    int            // number of live entries
 	mask int
+
+	// byteSize is the approximate bytes retained per pooled object, used for
+	// the retained-bytes summary in PoolStats.
+	byteSize int
+
+	// Cumulative counters, surfaced via PoolStats. Updated with atomics so
+	// they never contend with the ring mutex on the hot path.
+	gets    atomic.Uint64 // get() calls
+	puts    atomic.Uint64 // put() calls
+	ringHit atomic.Uint64 // served directly by the GC-surviving ring
+	poolHit atomic.Uint64 // served by the GC-cleared sync.Pool overflow
+	alloc   atomic.Uint64 // both missed: served by a fresh newFn allocation
+	demoted atomic.Uint64 // ring entries evicted to the overflow (sweeper / expired-head reuse)
 }
 
-// newRingPool creates a pool with a ring of the given capacity (must be a power of two).
-func newRingPool[T any](newFn func() T, capacity int) *ringPool[T] {
+// newRingPool creates a pool with a ring of the given capacity (must be a power
+// of two) and an approximate per-object byte size.
+func newRingPool[T any](newFn func() T, capacity, byteSize int) *ringPool[T] {
 	return &ringPool[T]{
-		newFn: newFn,
-		buf:   make([]ringEntry[T], capacity),
-		mask:  capacity - 1,
+		newFn:    newFn,
+		buf:      make([]ringEntry[T], capacity),
+		mask:     capacity - 1,
+		byteSize: byteSize,
 	}
 }
 
 // get returns an object from the ring, the overflow pool, or a fresh allocation.
 func (p *ringPool[T]) get() T {
+	p.gets.Add(1)
 	if v, ok := p.pop(); ok {
+		p.ringHit.Add(1)
 		return v
 	}
 	if v := p.spool.Get(); v != nil {
+		p.poolHit.Add(1)
 		return v.(T)
 	}
+	p.alloc.Add(1)
 	return p.newFn()
 }
 
@@ -224,6 +245,7 @@ func (p *ringPool[T]) pop() (T, bool) {
 
 // put returns v to the ring, or to the overflow pool if the ring is full.
 func (p *ringPool[T]) put(v T) {
+	p.puts.Add(1)
 	now := time.Now()
 	p.mu.Lock()
 	if p.n == len(p.buf) {
@@ -233,6 +255,7 @@ func (p *ringPool[T]) put(v T) {
 		// same as the sweeper, so it stays reusable until GC.
 		if now.Sub(p.buf[p.head].putTime) > poolTTL {
 			p.spool.Put(p.buf[p.head].v)
+			p.demoted.Add(1)
 			p.buf[p.head] = ringEntry[T]{v: v, putTime: now}
 			p.head = (p.head + 1) & p.mask
 			p.mu.Unlock()
@@ -255,10 +278,69 @@ func (p *ringPool[T]) sweep(expiredBefore time.Time) {
 	defer p.mu.Unlock()
 	for i := 0; i < poolSweepBatch && p.n > 0 && p.buf[p.head].putTime.Before(expiredBefore); i++ {
 		p.spool.Put(p.buf[p.head].v)
+		p.demoted.Add(1)
 		p.buf[p.head] = ringEntry[T]{}
 		p.head = (p.head + 1) & p.mask
 		p.n--
 	}
+}
+
+// PoolStats is a point-in-time snapshot of a ringPool's counters, mirroring
+// the outbound/pool Stats shape so the two buffer pools can be compared with
+// the same tooling.
+type PoolStats struct {
+	Gets      uint64 // get() calls
+	Puts      uint64 // put() calls
+	RingHit   uint64 // served directly by the GC-surviving ring
+	PoolHit   uint64 // served by the GC-cleared sync.Pool overflow
+	Alloc     uint64 // both missed: served by a fresh allocation
+	Demoted   uint64 // ring entries evicted to the overflow pool
+	Occupancy int    // live entries currently held by the ring
+	Max       int    // ring capacity
+	ByteSize  int    // approximate bytes retained per pooled object
+}
+
+// HitRate is the overall reuse efficiency: the fraction of get() calls served
+// by a pooled object instead of a fresh allocation.
+func (s PoolStats) HitRate() float64 {
+	if s.Gets == 0 {
+		return 0
+	}
+	return float64(s.Gets-s.Alloc) / float64(s.Gets)
+}
+
+// RingHitRate is the fraction of get() calls served by the GC-surviving ring
+// specifically.
+func (s PoolStats) RingHitRate() float64 {
+	if s.Gets == 0 {
+		return 0
+	}
+	return float64(s.RingHit) / float64(s.Gets)
+}
+
+// stats snapshots one ring pool. Occupancy is read under the ring mutex so it
+// is consistent; the counters are atomic loads.
+func (p *ringPool[T]) stats() PoolStats {
+	p.mu.Lock()
+	n := p.n
+	p.mu.Unlock()
+	return PoolStats{
+		Gets:      p.gets.Load(),
+		Puts:      p.puts.Load(),
+		RingHit:   p.ringHit.Load(),
+		PoolHit:   p.poolHit.Load(),
+		Alloc:     p.alloc.Load(),
+		Demoted:   p.demoted.Load(),
+		Occupancy: n,
+		Max:       len(p.buf),
+		ByteSize:  p.byteSize,
+	}
+}
+
+// PacketBufferPoolStats returns snapshots of the three GC-surviving pools: the
+// normal packet buffers, the large (GSO) packet buffers, and the addresses.
+func PacketBufferPoolStats() (buffer, large, addr PoolStats) {
+	return bufferPool.stats(), largeBufferPool.stats(), addrPool.stats()
 }
 
 // ringCapacity returns the ring capacity for a buffer of bufSize bytes: the
@@ -276,13 +358,13 @@ func ringCapacity(bufSize int) int {
 func init() {
 	bufferPool = newRingPool(func() *packetBuffer {
 		return &packetBuffer{Data: make([]byte, 0, protocol.MaxPacketBufferSize)}
-	}, ringCapacity(protocol.MaxPacketBufferSize))
+	}, ringCapacity(protocol.MaxPacketBufferSize), int(unsafe.Sizeof(packetBuffer{}))+protocol.MaxPacketBufferSize)
 	largeBufferPool = newRingPool(func() *packetBuffer {
 		return &packetBuffer{Data: make([]byte, 0, protocol.MaxLargePacketBufferSize)}
-	}, ringCapacity(protocol.MaxLargePacketBufferSize))
+	}, ringCapacity(protocol.MaxLargePacketBufferSize), int(unsafe.Sizeof(packetBuffer{}))+protocol.MaxLargePacketBufferSize)
 	addrPool = newRingPool(func() *net.UDPAddr {
 		return &net.UDPAddr{IP: make([]byte, 16)}
-	}, addrRingCapacity)
+	}, addrRingCapacity, int(unsafe.Sizeof(net.UDPAddr{}))+net.IPv6len)
 
 	// Background sweeper: periodically demote expired objects from each ring
 	// into the GC-cleared overflow pool, so an idle process's peak memory is
