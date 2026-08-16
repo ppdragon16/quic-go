@@ -37,6 +37,8 @@ func getPacket() *packet {
 }
 
 func putPacket(p *packet) {
+	PutFrames(p.Frames)
+	PutStreamFrames(p.StreamFrames)
 	p.Frames = nil
 	p.StreamFrames = nil
 	packetPool.Put(p)
