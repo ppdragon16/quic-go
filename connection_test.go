@@ -209,7 +209,6 @@ func TestConnectionHandleReceiveStreamFrames(t *testing.T) {
 	const streamID protocol.StreamID = 5
 	now := time.Now()
 	connID := protocol.ConnectionID{}
-	f := &wire.StreamFrame{StreamID: streamID, Data: []byte("foobar")}
 	rsf := &wire.ResetStreamFrame{StreamID: streamID, ErrorCode: 42, FinalSize: 1337}
 	sdbf := &wire.StreamDataBlockedFrame{StreamID: streamID, MaximumStreamData: 1337}
 
@@ -218,6 +217,9 @@ func TestConnectionHandleReceiveStreamFrames(t *testing.T) {
 		streamsMap := NewMockStreamManager(mockCtrl)
 		tc := newServerTestConnection(t, mockCtrl, nil, false, connectionOptStreamManager(streamsMap))
 		str := NewMockReceiveStreamI(mockCtrl)
+		// Each STREAM frame is a distinct pooled object; the receive paths
+		// below consume (PutBack) it, so it must not be shared across subtests.
+		f := &wire.StreamFrame{StreamID: streamID, Data: []byte("foobar")}
 		// STREAM frame
 		streamsMap.EXPECT().GetOrOpenReceiveStream(streamID).Return(str, nil)
 		str.EXPECT().handleStreamFrame(f, now)
@@ -235,6 +237,7 @@ func TestConnectionHandleReceiveStreamFrames(t *testing.T) {
 		mockCtrl := gomock.NewController(t)
 		streamsMap := NewMockStreamManager(mockCtrl)
 		tc := newServerTestConnection(t, mockCtrl, nil, false, connectionOptStreamManager(streamsMap))
+		f := &wire.StreamFrame{StreamID: streamID, Data: []byte("foobar")}
 		// STREAM frame
 		streamsMap.EXPECT().GetOrOpenReceiveStream(streamID).Return(nil, nil)
 		require.NoError(t, tc.conn.handleFrame(f, protocol.Encryption1RTT, connID, now))
@@ -251,6 +254,7 @@ func TestConnectionHandleReceiveStreamFrames(t *testing.T) {
 		streamsMap := NewMockStreamManager(mockCtrl)
 		tc := newServerTestConnection(t, mockCtrl, nil, false, connectionOptStreamManager(streamsMap))
 		testErr := errors.New("test err")
+		f := &wire.StreamFrame{StreamID: streamID, Data: []byte("foobar")}
 		// STREAM frame
 		streamsMap.EXPECT().GetOrOpenReceiveStream(streamID).Return(nil, testErr)
 		require.ErrorIs(t, tc.conn.handleFrame(f, protocol.Encryption1RTT, connID, now), testErr)

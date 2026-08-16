@@ -18,6 +18,16 @@ var MaxDatagramSize protocol.ByteCount = 1200
 type DatagramFrame struct {
 	DataLenPresent bool
 	Data           []byte
+
+	// putBack marks that the frame has been returned to datagramFramePool and
+	// must not be returned again until it is re-acquired via GetDatagramFrame.
+	// Like packetBuffer.refCount it does not support concurrent use. A second
+	// PutDatagramFrame without an intervening GetDatagramFrame is a
+	// double-put: the same frame (and its Data buffer) would be pooled twice
+	// and could be handed to two connections, corrupting each other's data.
+	// PutDatagramFrame panics on it instead of letting the corruption go
+	// silent.
+	putBack bool
 }
 
 func parseDatagramFrame(b []byte, typ uint64, _ protocol.Version) (*DatagramFrame, int, error) {

@@ -16,6 +16,15 @@ type StreamFrame struct {
 	Data           []byte
 	Fin            bool
 	DataLenPresent bool
+
+	// putBack marks that the frame has been returned to streamFramePool and
+	// must not be returned again until it is re-acquired via GetStreamFrame.
+	// Like packetBuffer.refCount it does not support concurrent use. A second
+	// PutBack without an intervening GetStreamFrame is a double-put: the same
+	// frame (and its Data buffer) would be pooled twice and could be handed to
+	// two connections, corrupting each other's data. putStreamFrame panics on
+	// it instead of letting the corruption go silent.
+	putBack bool
 }
 
 func parseStreamFrame(b []byte, typ uint64, _ protocol.Version) (*StreamFrame, int, error) {

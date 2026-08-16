@@ -20,6 +20,7 @@ func init() {
 func GetStreamFrame() *StreamFrame {
 	f := streamFramePool.Get().(*StreamFrame)
 	f.Data = nil
+	f.putBack = false
 	return f
 }
 
@@ -29,22 +30,33 @@ func GetStreamFrame() *StreamFrame {
 func GetDatagramFrame() *DatagramFrame {
 	f := datagramFramePool.Get().(*DatagramFrame)
 	f.Data = nil
+	f.putBack = false
 	return f
 }
 
 // PutDatagramFrame returns a pooled DatagramFrame (and its Data buffer via
 // PutBuffer) to the pool.
 func PutDatagramFrame(f *DatagramFrame) {
+	if f.putBack {
+		panic("wire.DatagramFrame double-put: frame returned to the pool more than once")
+	}
+	f.putBack = true
 	if f.Data != nil {
 		quicpool.PutBuffer(f.Data)
+		f.Data = nil
 	}
 	f.DataLenPresent = false
 	datagramFramePool.Put(f)
 }
 
 func putStreamFrame(f *StreamFrame) {
+	if f.putBack {
+		panic("wire.StreamFrame double-put: frame returned to the pool more than once")
+	}
+	f.putBack = true
 	if f.Data != nil {
 		quicpool.PutBuffer(f.Data)
+		f.Data = nil
 	}
 	streamFramePool.Put(f)
 }
