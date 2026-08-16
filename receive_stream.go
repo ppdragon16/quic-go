@@ -387,11 +387,13 @@ func (s *receiveStream) SetReadDeadline(t time.Time) error {
 // to the pool: the frame currently being read plus all frames buffered in the
 // frame sorter. Callers must hold s.mutex.
 func (s *receiveStream) releaseBufferedFrames() {
+	// Drop the slice reference before returning the backing buffer to the
+	// pool, so no stale header can alias a buffer that has been put back.
+	s.currentFrame = nil
 	if s.currentFrameFrame != nil {
 		s.currentFrameFrame.PutBack()
 		s.currentFrameFrame = nil
 	}
-	s.currentFrame = nil
 	s.frameQueue.Release()
 }
 

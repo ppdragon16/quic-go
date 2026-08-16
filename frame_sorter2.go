@@ -143,6 +143,9 @@ func (q *fastQueue) pop(readPos protocol.ByteCount) (frameEntry, bool) {
 	if e.offset != readPos {
 		return frameEntry{}, false
 	}
+	// Clear the slot so no stale Data/frame reference outlives the returned
+	// entry (which transfers ownership of the pooled buffer to the caller).
+	q.buf[q.write] = frameEntry{}
 	q.write = (q.write + 1) % cap(q.buf)
 	q.len--
 	if q.len == 0 {
@@ -156,7 +159,10 @@ func (q *fastQueue) pop(readPos protocol.ByteCount) (frameEntry, bool) {
 // Release to return the pooled data buffers of buffered frames.
 func (q *fastQueue) drain(fn func(frameEntry)) {
 	for i := 0; i < q.len; i++ {
-		fn(q.buf[(q.write+i)%cap(q.buf)])
+		idx := (q.write + i) % cap(q.buf)
+		e := q.buf[idx]
+		q.buf[idx] = frameEntry{} // drop the stale reference before fn releases the buffer
+		fn(e)
 	}
 	q.write = 0
 	q.len = 0
