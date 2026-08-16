@@ -10,7 +10,13 @@ import (
 )
 
 const frameChunkSize = 32
+
+// seqBufCap is the maximum number of entries the fast-path ring can hold
+// before spilling to the chunk list. The ring grows toward this limit from
+// seqBufInitial as needed, so streams with only a few buffered frames don't
+// pay for the full 128-entry allocation (5 KiB) up front.
 const seqBufCap = 128
+const seqBufInitial = 4
 
 // frameEntry is a single entry in a chunk.
 type frameEntry struct {
@@ -94,7 +100,10 @@ func freeChunk(c *frameChunk) {
 // It only holds entries when the chunk list is empty (head == nil).
 // Entries are always contiguous starting from readPos.
 type fastQueue struct {
-	buf   [seqBufCap]frameEntry
+	// buf is a growable ring. It starts nil and grows (doubling, up to
+	// seqBufCap) on demand, so streams with only a few buffered sequential
+	// frames don't pay for the full 128-entry allocation.
+	buf   []frameEntry
 	write int                // index of the oldest entry
 	len   int                // number of valid entries
 	end   protocol.ByteCount // end offset of the newest entry
@@ -104,11 +113,25 @@ func (q *fastQueue) empty() bool { return q.len == 0 }
 func (q *fastQueue) full() bool  { return q.len == seqBufCap }
 
 // push appends an entry. Caller guarantees the entry is contiguous (offset == q.end,
-// or offset == readPos when queue is empty).
+// or offset == readPos when queue is empty) and that the queue is not full.
 func (q *fastQueue) push(data []byte, offset protocol.ByteCount, frame *wire.StreamFrame) {
-	q.buf[(q.write+q.len)%seqBufCap] = frameEntry{offset: offset, Data: data, frame: frame}
+	if q.len == cap(q.buf) {
+		q.grow()
+	}
+	q.buf[(q.write+q.len)%cap(q.buf)] = frameEntry{offset: offset, Data: data, frame: frame}
 	q.len++
 	q.end = offset + protocol.ByteCount(len(data))
+}
+
+// grow doubles the ring capacity (from seqBufInitial up to seqBufCap),
+// linearizing the wrapped entries so write becomes 0.
+func (q *fastQueue) grow() {
+	newBuf := make([]frameEntry, min(max(cap(q.buf)*2, seqBufInitial), seqBufCap))
+	for i := 0; i < q.len; i++ {
+		newBuf[i] = q.buf[(q.write+i)%cap(q.buf)]
+	}
+	q.buf = newBuf
+	q.write = 0
 }
 
 // pop removes and returns the oldest entry if its offset matches readPos.
@@ -120,7 +143,7 @@ func (q *fastQueue) pop(readPos protocol.ByteCount) (frameEntry, bool) {
 	if e.offset != readPos {
 		return frameEntry{}, false
 	}
-	q.write = (q.write + 1) % seqBufCap
+	q.write = (q.write + 1) % cap(q.buf)
 	q.len--
 	if q.len == 0 {
 		q.write = 0
@@ -133,7 +156,7 @@ func (q *fastQueue) pop(readPos protocol.ByteCount) (frameEntry, bool) {
 // Release to return the pooled data buffers of buffered frames.
 func (q *fastQueue) drain(fn func(frameEntry)) {
 	for i := 0; i < q.len; i++ {
-		fn(q.buf[(q.write+i)%seqBufCap])
+		fn(q.buf[(q.write+i)%cap(q.buf)])
 	}
 	q.write = 0
 	q.len = 0
@@ -148,7 +171,7 @@ func (q *fastQueue) drainTo(head *frameChunk) *frameChunk {
 	var tail *frameChunk
 	for q.len > 0 {
 		e := q.buf[q.write]
-		q.write = (q.write + 1) % seqBufCap
+		q.write = (q.write + 1) % cap(q.buf)
 		q.len--
 		if tail == nil || tail.len == frameChunkSize {
 			c := allocChunk()
