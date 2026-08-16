@@ -216,12 +216,44 @@ func (c *oobConn) ReadPacket() (receivedPacket, error) {
 	return p, nil
 }
 
+// sendmsgOp carries the per-send state through the RawConn.Write callback
+// without allocating a closure (or its captured locals) per packet. Instances
+// are pooled; the pre-bound fn and the sockaddr buffer are reused, and the
+// payload/oob slices are re-pointed on each use. WritePacket may be called
+// concurrently from multiple connections' send loops, so the state lives in a
+// pool rather than on the shared oobConn.
+type sendmsgOp struct {
+	p     []byte
+	oob   []byte
+	saBuf [28]byte
+	salen int
+
+	n   int
+	err error
+
+	fn func(uintptr) bool // pre-bound to o.run
+}
+
+func (o *sendmsgOp) run(fd uintptr) bool {
+	o.n, o.err = sendmsgRaw(int(fd), o.p, o.oob, o.saBuf[:o.salen])
+	return o.err != syscall.EAGAIN && o.err != syscall.EWOULDBLOCK
+}
+
+var sendmsgOpPool = sync.Pool{
+	New: func() any {
+		o := &sendmsgOp{}
+		o.fn = o.run
+		return o
+	},
+}
+
 // WritePacket writes a new packet.
 func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gsoSize uint16, ecn protocol.ECN) (int, error) {
 	udpAddr, ok := addr.(*net.UDPAddr)
 	if !ok {
 		return 0, errors.New("quic: oobConn.WritePacket: address is not a *net.UDPAddr")
 	}
+	isIPv4 := udpAddr.IP.To4() != nil
 
 	oob := packetInfoOOB
 	if gsoSize > 0 {
@@ -236,17 +268,6 @@ func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gso
 		}
 	}
 
-	// Marshal the remote address into a raw sockaddr on the stack. This avoids
-	// the per-send syscall.Sockaddr allocation that net.UDPConn.WriteMsgUDP
-	// performs via net.ipToSockaddr — the largest allocation source on the
-	// QUIC send path.
-	isIPv4 := udpAddr.IP.To4() != nil
-	var saBuf [28]byte // sockaddr_in6 is the largest sockaddr used here
-	salen, err := marshalSockaddr(saBuf[:], udpAddr, isIPv4)
-	if err != nil {
-		return 0, err
-	}
-
 	if ecn != protocol.ECNUnsupported {
 		if !c.capabilities().ECN {
 			panic("tried to send an ECN-marked packet although ECN is disabled")
@@ -258,16 +279,26 @@ func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gso
 		}
 	}
 
-	var n int
-	err = c.rawConn.Write(func(fd uintptr) bool {
-		var werr error
-		n, werr = sendmsgRaw(int(fd), b, oob, saBuf[:salen])
-		return werr != syscall.EAGAIN && werr != syscall.EWOULDBLOCK
-	})
-	if err != nil {
-		return n, err
+	// Marshal the remote address into a raw sockaddr. Using a pooled op avoids
+	// the per-send syscall.Sockaddr allocation that net.UDPConn.WriteMsgUDP
+	// performs via net.ipToSockaddr, and the per-send closure allocation of a
+	// RawConn.Write callback.
+	op := sendmsgOpPool.Get().(*sendmsgOp)
+	defer sendmsgOpPool.Put(op)
+	op.p = b
+	op.oob = oob
+	var err error
+	if op.salen, err = marshalSockaddr(op.saBuf[:], udpAddr, isIPv4); err != nil {
+		return 0, err
 	}
-	return n, nil
+	if err = c.rawConn.Write(op.fn); err != nil {
+		op.p = nil
+		op.oob = nil
+		return op.n, err
+	}
+	op.p = nil
+	op.oob = nil
+	return op.n, op.err
 }
 
 // marshalSockaddr marshals addr into buf as a raw sockaddr (sockaddr_in for

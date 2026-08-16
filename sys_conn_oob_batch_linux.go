@@ -48,10 +48,25 @@ type linuxOOBRead struct {
 	iovs      [batchSize]unix.Iovec
 	sockaddrs [batchSize][sockaddrBufSize]byte
 	oob       [batchSize][oobBufferSize]byte
+
+	// recvN/recvErr hold the result of the last recvmmsg syscall, and recvFn
+	// is the pre-bound callback passed to RawConn.Read, so no closure (and no
+	// captured locals) is allocated per batch. The receiver is single-goroutine
+	// (the transport's read loop), so these fields need no synchronization.
+	recvN   int
+	recvErr error
+	recvFn  func(uintptr) bool
+}
+
+func (r *linuxOOBRead) recv(fd uintptr) bool {
+	r.recvN, r.recvErr = recvmmsg(int(fd), r.hs[:], 0)
+	return r.recvErr != syscall.EAGAIN && r.recvErr != syscall.EWOULDBLOCK
 }
 
 func newOOBReadState(OOBCapablePacketConn) oobReadState {
-	return &linuxOOBRead{}
+	r := &linuxOOBRead{}
+	r.recvFn = r.recv
+	return r
 }
 
 func (r *linuxOOBRead) read(c *oobConn, refill int) (int, error) {
@@ -84,19 +99,14 @@ func (r *linuxOOBRead) read(c *oobConn, refill int) (int, error) {
 		r.hs[i].Len = 0
 	}
 
-	var n int
-	var errno error
-	err := c.rawConn.Read(func(fd uintptr) bool {
-		n, errno = recvmmsg(int(fd), r.hs[:], 0)
-		return errno != syscall.EAGAIN && errno != syscall.EWOULDBLOCK
-	})
+	err := c.rawConn.Read(r.recvFn)
 	if err != nil {
-		return n, err
+		return r.recvN, err
 	}
-	if errno != nil {
-		return n, errno
+	if r.recvErr != nil {
+		return r.recvN, r.recvErr
 	}
-	return n, nil
+	return r.recvN, nil
 }
 
 func (r *linuxOOBRead) datagram(c *oobConn, i int) (payload, oob []byte, addr *net.UDPAddr) {
