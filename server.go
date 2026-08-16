@@ -390,8 +390,14 @@ func (s *baseServer) handlePacket(p receivedPacket) {
 	select {
 	case s.receivedPackets <- p:
 	case <-s.errorChan:
+		if p.buffer != nil {
+			p.buffer.Release()
+		}
 		return
 	default:
+		if p.buffer != nil {
+			p.buffer.Release()
+		}
 		s.logger.Debugf("Dropping packet from %s (%d bytes). Server receive queue full.", p.remoteAddr, p.Size())
 		if s.tracer != nil && s.tracer.DroppedPacket != nil {
 			s.tracer.DroppedPacket(p.remoteAddr, logging.PacketTypeNotDetermined, p.Size(), logging.PacketDropDOSPrevention)

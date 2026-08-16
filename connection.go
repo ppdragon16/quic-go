@@ -1392,6 +1392,10 @@ func (s *connection) handlePacket(p receivedPacket) {
 	select {
 	case s.receivedPackets <- p:
 	default:
+		// Dropped: release the buffer (and its pooled address).
+		if p.buffer != nil {
+			p.buffer.Release()
+		}
 		if s.tracer != nil && s.tracer.DroppedPacket != nil {
 			s.tracer.DroppedPacket(logging.PacketTypeNotDetermined, protocol.InvalidPacketNumber, p.Size(), logging.PacketDropDOSPrevention)
 		}
@@ -2092,6 +2096,8 @@ func (s *connection) maybeSendAckOnlyPacket(now time.Time) error {
 	ecn := s.sentPacketHandler.ECNMode(true)
 	p, buf, err := s.packer.PackAckOnlyPacket(s.maxPacketSize(), now, s.version)
 	if err != nil {
+		// PackAckOnlyPacket already acquired a buffer; release it on error.
+		buf.Release()
 		if err == errNothingToPack {
 			return nil
 		}
