@@ -318,6 +318,13 @@ func (s PoolStats) RingHitRate() float64 {
 	return float64(s.RingHit) / float64(s.Gets)
 }
 
+// InFlight is the number of objects currently checked out: gotten but not yet
+// put back (Gets - Puts). A leak shows up as this value growing monotonically
+// while traffic stays flat.
+func (s PoolStats) InFlight() uint64 {
+	return s.Gets - s.Puts
+}
+
 // stats snapshots one ring pool. Occupancy is read under the ring mutex so it
 // is consistent; the counters are atomic loads.
 func (p *ringPool[T]) stats() PoolStats {
