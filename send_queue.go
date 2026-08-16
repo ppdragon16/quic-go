@@ -84,7 +84,18 @@ func (h *sendQueue) Run() error {
 				// 2. Path MTU discovery,and
 				// 3. Eventual detection of loss PingFrame.
 				if !isSendMsgSizeErr(err) {
-					return err
+					// Unrecoverable write error: release this buffer and the
+					// remaining queued buffers before stopping, otherwise they
+					// would be leaked (never sent and never released).
+					e.buf.Release()
+					for {
+						select {
+						case queued := <-h.queue:
+							queued.buf.Release()
+						default:
+							return err
+						}
+					}
 				}
 			}
 			e.buf.Release()
