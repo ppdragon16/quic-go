@@ -3,6 +3,7 @@ package http3
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/textproto"
 	"net/url"
@@ -13,6 +14,27 @@ import (
 
 	"github.com/quic-go/qpack"
 )
+
+// decodeFull decodes a complete QPACK header block into a slice of header
+// fields. It mirrors the removed qpack.Decoder.DecodeFull API from qpack
+// v0.5, which was replaced by the pull-based Decode method in v0.6.
+func decodeFull(decoder *qpack.Decoder, p []byte) ([]qpack.HeaderField, error) {
+	if len(p) == 0 {
+		return []qpack.HeaderField{}, nil
+	}
+	dec := decoder.Decode(p)
+	var hfs []qpack.HeaderField
+	for {
+		hf, err := dec()
+		if errors.Is(err, io.EOF) {
+			return hfs, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		hfs = append(hfs, hf)
+	}
+}
 
 type header struct {
 	// Pseudo header fields defined in RFC 9114

@@ -475,7 +475,7 @@ var _ = Describe("Client", func() {
 
 		decodeHeader := func(str io.Reader) map[string]string {
 			fields := make(map[string]string)
-			decoder := qpack.NewDecoder(nil)
+			decoder := qpack.NewDecoder()
 
 			fp := frameParser{r: str}
 			frame, err := fp.ParseNext()
@@ -485,7 +485,7 @@ var _ = Describe("Client", func() {
 			data := make([]byte, headersFrame.Length)
 			_, err = io.ReadFull(str, data)
 			ExpectWithOffset(1, err).ToNot(HaveOccurred())
-			hfs, err := decoder.DecodeFull(data)
+			hfs, err := decodeFull(decoder, data)
 			ExpectWithOffset(1, err).ToNot(HaveOccurred())
 			for _, p := range hfs {
 				fields[p.Name] = p.Value

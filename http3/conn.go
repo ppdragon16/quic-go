@@ -75,7 +75,7 @@ func newConnection(
 		logger:           logger,
 		idleTimeout:      idleTimeout,
 		enableDatagrams:  enableDatagrams,
-		decoder:          qpack.NewDecoder(func(hf qpack.HeaderField) {}),
+		decoder:          qpack.NewDecoder(),
 		receivedSettings: make(chan struct{}),
 		streams:          make(map[protocol.StreamID]*datagrammer),
 	}
@@ -137,7 +137,7 @@ func (c *connection) decodeTrailers(r io.Reader, l, maxHeaderBytes uint64) (http
 	if _, err := io.ReadFull(r, b); err != nil {
 		return nil, err
 	}
-	fields, err := c.decoder.DecodeFull(b)
+	fields, err := decodeFull(c.decoder, b)
 	if err != nil {
 		return nil, err
 	}

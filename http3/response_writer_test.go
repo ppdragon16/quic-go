@@ -33,7 +33,7 @@ var _ = Describe("Response Writer", func() {
 		rw.Flush()
 		rw.flushTrailers()
 		fields := make(map[string][]string)
-		decoder := qpack.NewDecoder(nil)
+		decoder := qpack.NewDecoder()
 
 		fp := frameParser{r: str}
 		frame, err := fp.ParseNext()
@@ -43,7 +43,7 @@ var _ = Describe("Response Writer", func() {
 		data := make([]byte, headersFrame.Length)
 		_, err = io.ReadFull(str, data)
 		Expect(err).ToNot(HaveOccurred())
-		hfs, err := decoder.DecodeFull(data)
+		hfs, err := decodeFull(decoder, data)
 		Expect(err).ToNot(HaveOccurred())
 		for _, p := range hfs {
 			fields[p.Name] = append(fields[p.Name], p.Value)

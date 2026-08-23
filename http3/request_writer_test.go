@@ -30,8 +30,8 @@ var _ = Describe("Request Writer", func() {
 		data := make([]byte, headersFrame.Length)
 		_, err = io.ReadFull(str, data)
 		ExpectWithOffset(1, err).ToNot(HaveOccurred())
-		decoder := qpack.NewDecoder(nil)
-		hfs, err := decoder.DecodeFull(data)
+		decoder := qpack.NewDecoder()
+		hfs, err := decodeFull(decoder, data)
 		ExpectWithOffset(1, err).ToNot(HaveOccurred())
 		values := make(map[string]string)
 		for _, hf := range hfs {

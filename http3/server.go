@@ -628,7 +628,7 @@ func (s *Server) handleRequest(conn *connection, str quic.Stream, datagrams *dat
 		str.CancelWrite(quic.StreamErrorCode(ErrCodeRequestIncomplete))
 		return
 	}
-	hfs, err := decoder.DecodeFull(headerBlock)
+	hfs, err := decodeFull(decoder, headerBlock)
 	if err != nil {
 		// TODO: use the right error code
 		conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeGeneralProtocolError), "expected first frame to be a HEADERS frame")

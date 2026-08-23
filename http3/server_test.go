@@ -97,7 +97,7 @@ var _ = Describe("Server", func() {
 
 		decodeHeader := func(str io.Reader) map[string][]string {
 			fields := make(map[string][]string)
-			decoder := qpack.NewDecoder(nil)
+			decoder := qpack.NewDecoder()
 
 			fp := frameParser{r: str}
 			frame, err := fp.ParseNext()
@@ -107,7 +107,7 @@ var _ = Describe("Server", func() {
 			data := make([]byte, headersFrame.Length)
 			_, err = io.ReadFull(str, data)
 			ExpectWithOffset(1, err).ToNot(HaveOccurred())
-			hfs, err := decoder.DecodeFull(data)
+			hfs, err := decodeFull(decoder, data)
 			ExpectWithOffset(1, err).ToNot(HaveOccurred())
 			for _, p := range hfs {
 				fields[p.Name] = append(fields[p.Name], p.Value)
@@ -141,7 +141,7 @@ var _ = Describe("Server", func() {
 			examplePostRequest, err = http.NewRequest("POST", "https://www.example.com", bytes.NewReader([]byte("foobar")))
 			Expect(err).ToNot(HaveOccurred())
 
-			qpackDecoder = qpack.NewDecoder(nil)
+			qpackDecoder = qpack.NewDecoder()
 			str = mockquic.NewMockStream(mockCtrl)
 			str.EXPECT().Context().Return(reqContext).AnyTimes()
 			str.EXPECT().StreamID().AnyTimes()
@@ -624,7 +624,7 @@ var _ = Describe("Server", func() {
 				data := make([]byte, df.Length)
 				_, err = io.ReadFull(&buf, data)
 				Expect(err).ToNot(HaveOccurred())
-				hdrs, err := qpackDecoder.DecodeFull(data)
+				hdrs, err := decodeFull(qpackDecoder, data)
 				Expect(err).ToNot(HaveOccurred())
 				Expect(hdrs).To(ContainElement(qpack.HeaderField{Name: ":status", Value: "200"}))
 				Expect(buf.Bytes()).To(Equal([]byte("foobar")))
