@@ -250,7 +250,10 @@ var sendmsgOpPool = sync.Pool{
 // WritePacket writes a new packet.
 func (c *oobConn) WritePacket(b []byte, addr net.Addr, packetInfoOOB []byte, gsoSize uint16, ecn protocol.ECN) (int, error) {
 	udpAddr, ok := addr.(*net.UDPAddr)
-	if !ok {
+	if !ok || udpAddr == nil {
+		// Reject both an untyped nil and a typed-nil (*net.UDPAddr)(nil):
+		// the latter passes the type assertion but would panic in
+		// udpAddr.IP.To4() below.
 		return 0, errors.New("quic: oobConn.WritePacket: address is not a *net.UDPAddr")
 	}
 	isIPv4 := udpAddr.IP.To4() != nil

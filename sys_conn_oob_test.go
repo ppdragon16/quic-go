@@ -334,6 +334,19 @@ func TestOOBConnWritePacket(t *testing.T) {
 	}
 }
 
+func TestOOBConnWritePacketNilAddr(t *testing.T) {
+	// A nil or typed-nil destination must be rejected without panicking:
+	// (*net.UDPAddr)(nil) passes the type assertion but would nil-deref in
+	// udpAddr.IP.To4(). The guard runs before any socket access, so a
+	// zero-value oobConn is sufficient.
+	c := &oobConn{}
+	for _, addr := range []net.Addr{nil, (*net.UDPAddr)(nil)} {
+		n, err := c.WritePacket([]byte("foobar"), addr, nil, 0, protocol.ECNUnsupported)
+		require.Error(t, err)
+		require.Zero(t, n)
+	}
+}
+
 func TestAppendECNMsgs(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
