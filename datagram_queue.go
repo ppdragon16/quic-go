@@ -63,7 +63,18 @@ var ErrDatagramQueueFullTimeout = errors.New("datagram send queue full: timed ou
 // an interface on every Put/Get (a 24B slice-header escape allocation per
 // datagram), and it has no upper bound, so a burst can pin arbitrarily many
 // buffers until the next GC. The channel pool is allocation-free and capped.
-var datagramBufPool = newDatagramBufPool()
+var datagramBufPool *datagramBufPoolT
+var datagramBufPoolOnce sync.Once
+
+// getDatagramBufPool lazily initializes the receive-side datagram buffer pool
+// on first use instead of at package init, so processes that never receive a
+// QUIC datagram do not pay the pool's pre-warm cost.
+func getDatagramBufPool() *datagramBufPoolT {
+	datagramBufPoolOnce.Do(func() {
+		datagramBufPool = newDatagramBufPool()
+	})
+	return datagramBufPool
+}
 
 type datagramBufPoolT struct {
 	ch chan []byte
@@ -234,9 +245,9 @@ func (h *datagramQueue) Pop() {
 // to maxDatagramRcvQueueLen on first overflow. Once the maximum is reached,
 // incoming datagrams are silently dropped.
 func (h *datagramQueue) HandleDatagramFrame(f *wire.DatagramFrame) {
-	buf := datagramBufPool.Get()
+	buf := getDatagramBufPool().Get()
 	if cap(buf) < len(f.Data) {
-		datagramBufPool.Put(buf)
+		getDatagramBufPool().Put(buf)
 		buf = make([]byte, len(f.Data))
 	} else {
 		buf = buf[:len(f.Data)]
@@ -283,7 +294,7 @@ func (h *datagramQueue) ReleaseDatagram(data []byte) {
 		// caller-supplied buffer); let GC reclaim it.
 		return
 	}
-	datagramBufPool.Put(data)
+	getDatagramBufPool().Put(data)
 }
 
 // Receive gets a received DATAGRAM frame.

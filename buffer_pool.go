@@ -73,16 +73,16 @@ func (b *packetBuffer) putBack() {
 		// Addresses sourced from x/net or the stdlib on the non-OOB paths may
 		// have a 4-byte backing array; those are dropped and GC'd instead.
 		if cap(b.addr.IP) >= net.IPv6len {
-			addrPool.put(b.addr)
+			getAddrPool().put(b.addr)
 		}
 		b.addr = nil
 	}
 	if cap(b.Data) == protocol.MaxPacketBufferSize {
-		bufferPool.put(b)
+		getBufferPool().put(b)
 		return
 	}
 	if cap(b.Data) == protocol.MaxLargePacketBufferSize {
-		largeBufferPool.put(b)
+		getLargeBufferPool().put(b)
 		return
 	}
 	panic("putPacketBuffer called with packet of wrong size!")
@@ -94,9 +94,27 @@ func (b *packetBuffer) putBack() {
 // of receive buffers/addresses and force fresh allocations.
 var bufferPool, largeBufferPool *ringPool[*packetBuffer]
 var addrPool *ringPool[*net.UDPAddr]
+var poolInitOnce sync.Once
+
+// getBufferPool / getLargeBufferPool / getAddrPool lazily initialize the
+// GC-surviving pools on first use instead of at package init. dae_ppdn is
+// shared by users who may not use QUIC at all; deferring the ring allocation
+// (~300KB of ring storage) keeps their idle footprint near zero.
+func getBufferPool() *ringPool[*packetBuffer] {
+	poolInitOnce.Do(initPools)
+	return bufferPool
+}
+func getLargeBufferPool() *ringPool[*packetBuffer] {
+	poolInitOnce.Do(initPools)
+	return largeBufferPool
+}
+func getAddrPool() *ringPool[*net.UDPAddr] {
+	poolInitOnce.Do(initPools)
+	return addrPool
+}
 
 func getPacketBuffer() *packetBuffer {
-	buf := bufferPool.get()
+	buf := getBufferPool().get()
 	buf.refCount = 1
 	buf.Data = buf.Data[:0]
 	buf.addr = nil
@@ -104,7 +122,7 @@ func getPacketBuffer() *packetBuffer {
 }
 
 func getLargePacketBuffer() *packetBuffer {
-	buf := largeBufferPool.get()
+	buf := getLargeBufferPool().get()
 	buf.refCount = 1
 	buf.Data = buf.Data[:0]
 	buf.addr = nil
@@ -114,7 +132,7 @@ func getLargePacketBuffer() *packetBuffer {
 // getPooledAddr returns a *net.UDPAddr from the addr pool, populated from addrPort.
 // The IP backing array is pre-allocated (16 bytes), so no allocation.
 func getPooledAddr(addrPort netip.AddrPort) *net.UDPAddr {
-	addr := addrPool.get()
+	addr := getAddrPool().get()
 	fillAddrFromPort(addr, addrPort)
 	return addr
 }
@@ -347,7 +365,7 @@ func (p *ringPool[T]) stats() PoolStats {
 // PacketBufferPoolStats returns snapshots of the three GC-surviving pools: the
 // normal packet buffers, the large (GSO) packet buffers, and the addresses.
 func PacketBufferPoolStats() (buffer, large, addr PoolStats) {
-	return bufferPool.stats(), largeBufferPool.stats(), addrPool.stats()
+	return getBufferPool().stats(), getLargeBufferPool().stats(), getAddrPool().stats()
 }
 
 // ringCapacity returns the ring capacity for a buffer of bufSize bytes: the
@@ -362,7 +380,10 @@ func ringCapacity(bufSize int) int {
 	return c
 }
 
-func init() {
+// initPools lazily initializes the three GC-surviving pools and starts the
+// background sweeper. It is invoked via sync.Once from the getters above, so
+// the ring storage is only allocated when a QUIC connection first needs it.
+func initPools() {
 	bufferPool = newRingPool(func() *packetBuffer {
 		return &packetBuffer{Data: make([]byte, 0, protocol.MaxPacketBufferSize)}
 	}, ringCapacity(protocol.MaxPacketBufferSize), int(unsafe.Sizeof(packetBuffer{}))+protocol.MaxPacketBufferSize)
