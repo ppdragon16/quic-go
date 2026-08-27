@@ -75,6 +75,9 @@ func parseStreamFrame(b []byte, typ uint64, _ protocol.Version) (*StreamFrame, i
 		copy(frame.Data, b)
 	}
 	if frame.Offset+frame.DataLen() > protocol.MaxByteCount {
+		// Return the pooled frame (and its Data buffer), or every malformed
+		// offset-overflow packet silently drains one object from the pool.
+		putStreamFrame(frame)
 		return nil, 0, errors.New("stream data overflows maximum offset")
 	}
 	return frame, startLen - len(b) + int(dataLen), nil
