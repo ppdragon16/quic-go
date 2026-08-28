@@ -137,11 +137,7 @@ func (c *connection) decodeTrailers(r io.Reader, l, maxHeaderBytes uint64) (http
 	if _, err := io.ReadFull(r, b); err != nil {
 		return nil, err
 	}
-	fields, err := decodeFull(c.decoder, b)
-	if err != nil {
-		return nil, err
-	}
-	return parseTrailers(fields)
+	return parseTrailersIncremental(c.decoder.Decode(b), int(maxHeaderBytes))
 }
 
 func (c *connection) acceptStream(ctx context.Context) (quic.Stream, *datagrammer, error) {

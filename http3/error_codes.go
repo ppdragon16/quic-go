@@ -27,6 +27,8 @@ const (
 	ErrCodeConnectError         ErrCode = 0x10f
 	ErrCodeVersionFallback      ErrCode = 0x110
 	ErrCodeDatagramError        ErrCode = 0x33
+
+	ErrCodeQPACKDecompressionFailed ErrCode = 0x200
 )
 
 func (e ErrCode) String() string {
@@ -75,6 +77,8 @@ func (e ErrCode) string() string {
 		return "H3_VERSION_FALLBACK"
 	case ErrCodeDatagramError:
 		return "H3_DATAGRAM_ERROR"
+	case ErrCodeQPACKDecompressionFailed:
+		return "QPACK_DECOMPRESSION_FAILED"
 	default:
 		return ""
 	}

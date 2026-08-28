@@ -628,16 +628,20 @@ func (s *Server) handleRequest(conn *connection, str quic.Stream, datagrams *dat
 		str.CancelWrite(quic.StreamErrorCode(ErrCodeRequestIncomplete))
 		return
 	}
-	hfs, err := decodeFull(decoder, headerBlock)
+	req, err := requestFromHeadersIncremental(decoder.Decode(headerBlock), int(s.maxHeaderBytes()))
 	if err != nil {
-		// TODO: use the right error code
-		conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeGeneralProtocolError), "expected first frame to be a HEADERS frame")
-		return
-	}
-	req, err := requestFromHeaders(hfs)
-	if err != nil {
-		str.CancelRead(quic.StreamErrorCode(ErrCodeMessageError))
-		str.CancelWrite(quic.StreamErrorCode(ErrCodeMessageError))
+		errCode := ErrCodeMessageError
+		var qpackErr *qpackError
+		if errors.As(err, &qpackErr) {
+			// RFC 9204, Section 4.2: field-section decoding failures are
+			// connection errors, since QPACK state is connection-scoped.
+			conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeQPACKDecompressionFailed), err.Error())
+			return
+		} else if errors.Is(err, errHeaderTooLarge) {
+			errCode = ErrCodeExcessiveLoad
+		}
+		str.CancelRead(quic.StreamErrorCode(errCode))
+		str.CancelWrite(quic.StreamErrorCode(errCode))
 		return
 	}
 

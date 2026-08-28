@@ -231,16 +231,18 @@ func (s *requestStream) ReadResponse() (*http.Response, error) {
 		s.Stream.CancelWrite(quic.StreamErrorCode(ErrCodeRequestIncomplete))
 		return nil, fmt.Errorf("http3: failed to read response headers: %w", err)
 	}
-	hfs, err := decodeFull(s.decoder, headerBlock)
-	if err != nil {
-		// TODO: use the right error code
-		s.conn.CloseWithError(quic.ApplicationErrorCode(ErrCodeGeneralProtocolError), "")
-		return nil, fmt.Errorf("http3: failed to decode response headers: %w", err)
-	}
 	res := s.response
-	if err := updateResponseFromHeaders(res, hfs); err != nil {
-		s.Stream.CancelRead(quic.StreamErrorCode(ErrCodeMessageError))
-		s.Stream.CancelWrite(quic.StreamErrorCode(ErrCodeMessageError))
+	err = updateResponseFromHeadersIncremental(res, s.decoder.Decode(headerBlock), int(s.maxHeaderBytes))
+	if err != nil {
+		errCode := ErrCodeMessageError
+		var qpackErr *qpackError
+		if errors.As(err, &qpackErr) {
+			errCode = ErrCodeQPACKDecompressionFailed
+		} else if errors.Is(err, errHeaderTooLarge) {
+			errCode = ErrCodeExcessiveLoad
+		}
+		s.Stream.CancelRead(quic.StreamErrorCode(errCode))
+		s.Stream.CancelWrite(quic.StreamErrorCode(errCode))
 		return nil, fmt.Errorf("http3: invalid response: %w", err)
 	}
 

@@ -164,7 +164,7 @@ var _ = Describe("Request Stream", func() {
 			make(chan struct{}),
 			qpack.NewDecoder(),
 			true,
-			math.MaxUint64,
+			uint64(math.MaxInt),
 			&http.Response{},
 			&httptrace.ClientTrace{},
 		)
