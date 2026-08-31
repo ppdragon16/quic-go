@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptrace"
 
+	"github.com/daeuniverse/quic-go"
 	mockquic "github.com/daeuniverse/quic-go/internal/mocks/quic"
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/qerr"
@@ -153,11 +154,12 @@ var _ = Describe("Stream", func() {
 var _ = Describe("Request Stream", func() {
 	var str *requestStream
 	var qstr *mockquic.MockStream
+	var conn *mockquic.MockEarlyConnection
 
 	BeforeEach(func() {
 		qstr = mockquic.NewMockStream(mockCtrl)
 		requestWriter := newRequestWriter()
-		conn := mockquic.NewMockEarlyConnection(mockCtrl)
+		conn = mockquic.NewMockEarlyConnection(mockCtrl)
 		str = newRequestStream(
 			newStream(qstr, newConnection(context.Background(), conn, false, protocol.PerspectiveClient, nil, 0), nil, func(r io.Reader, u uint64) error { return nil }),
 			requestWriter,
@@ -201,5 +203,24 @@ var _ = Describe("Request Stream", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(n).To(Equal(6))
 		Expect(b[:n]).To(Equal([]byte("foobar")))
+	})
+
+	It("closes the connection on a QPACK decoding error", func() {
+		req, err := http.NewRequest(http.MethodGet, "https://quic-go.net", nil)
+		Expect(err).ToNot(HaveOccurred())
+		qstr.EXPECT().Write(gomock.Any()).AnyTimes()
+		Expect(str.SendRequestHeader(req)).To(Succeed())
+
+		b := (&headersFrame{Length: 1}).Append(nil)
+		buf := bytes.NewBuffer(append(b, 0xff)) // truncated QPACK field-section prefix
+		qstr.EXPECT().Read(gomock.Any()).DoAndReturn(buf.Read).AnyTimes()
+		conn.EXPECT().CloseWithError(
+			quic.ApplicationErrorCode(ErrCodeQPACKDecompressionFailed),
+			gomock.Any(),
+		).Return(nil)
+
+		_, err = str.ReadResponse()
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("qpack"))
 	})
 })
