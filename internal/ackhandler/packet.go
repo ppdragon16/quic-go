@@ -22,6 +22,11 @@ type packet struct {
 	includedInBytesInFlight bool
 	declaredLost            bool
 	skippedPacket           bool
+	// noRetransmittableFrames marks packets that were sent without any
+	// retained frame -- a DATAGRAM-only packet is ack-eliciting but its
+	// frame is pooled right after serialization and is never retransmitted
+	// (RFC 9221). Losing such a packet has nothing to requeue.
+	noRetransmittableFrames bool
 }
 
 func (p *packet) outstanding() bool {

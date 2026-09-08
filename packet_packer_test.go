@@ -65,6 +65,7 @@ func newTestPacketPacker(t *testing.T, mockCtrl *gomock.Controller, pers protoco
 			ackFramer,
 			datagramQueue,
 			pers,
+			false,
 		),
 	}
 }
@@ -572,10 +573,14 @@ func TestPackDatagramFrames(t *testing.T) {
 	buffer := getPacketBuffer()
 	p, err := tp.packer.AppendPacket(buffer, protocol.MaxByteCount, time.Now(), protocol.Version1)
 	require.NoError(t, err)
-	require.Len(t, p.Frames, 1)
-	require.IsType(t, &wire.DatagramFrame{}, p.Frames[0].Frame)
-	require.Equal(t, []byte("foobar"), p.Frames[0].Frame.(*wire.DatagramFrame).Data)
-	require.NotEmpty(t, buffer.Data)
+	// The DATAGRAM frame is pooled right after serialization and is
+	// deliberately not retained in the packet's frame list (never
+	// retransmitted, RFC 9221) -- only its bytes are in the packet buffer.
+	require.Empty(t, p.Frames)
+	// A datagram-only packet must still be treated as ack-eliciting.
+	require.True(t, p.AckEliciting)
+	require.Contains(t, string(buffer.Data), "foobar")
+	require.Nil(t, tp.datagramQueue.Peek()) // consumed by the packer
 }
 
 func TestPackLargeDatagramFrame(t *testing.T) {

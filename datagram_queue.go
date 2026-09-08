@@ -129,7 +129,7 @@ type datagramQueue struct {
 }
 
 func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
-	return &datagramQueue{
+	q := &datagramQueue{
 		hasData: hasData,
 		rcvd:    make(chan struct{}, 1),
 		sent:    make(chan struct{}, 1),
@@ -148,21 +148,23 @@ func newDatagramQueue(hasData func(), logger utils.Logger) *datagramQueue {
 			return rb
 		}(),
 	}
+	return q
 }
 
 // Add queues a new DATAGRAM frame for sending.
 // The send queue starts at initDatagramSendQueueLen entries and grows once
 // to maxDatagramSendQueueLen on first overflow. Once the maximum is reached,
 // Add blocks until space is available or datagramSendQueueFullTimeout elapses,
-// whichever comes first. The timeout bounds a send-side stall (queue full with
-// nothing dequeued) so a stalled transport cannot strand the caller forever.
+// whichever comes first. The timeout is a wall-clock deadline from the first
+// blocked wait: a trickle of Pop/sent notifications must not reset it, or a
+// chronically full queue would park the sender indefinitely.
 func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 	h.sendMx.Lock()
 
-	// Allocated lazily on the first block so the common (non-blocking) path
-	// does not pay for a timer, then reused across blocking iterations so a
-	// stalled queue under sustained backpressure doesn't allocate one per
-	// blocked datagram.
+	// Absolute deadline from the first blocked wait; the timer is created
+	// once and never reset, so dequeue notifications cannot extend the
+	// wait. Stopped in defer on the way out.
+	var deadline time.Time
 	var timer *time.Timer
 	defer func() {
 		if timer != nil {
@@ -171,6 +173,15 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 	}()
 
 	for {
+		// Fail fast when the connection closed while this Add was waiting
+		// for the mutex: a frame queued after CloseWithError's drain would
+		// otherwise be dropped silently while Add reports success.
+		select {
+		case <-h.closed:
+			h.sendMx.Unlock()
+			return h.closeErr
+		default:
+		}
 		if h.sendQueue.Len() < h.sendQueue.Cap() {
 			h.sendQueue.PushBack(f)
 			h.sendMx.Unlock()
@@ -189,22 +200,15 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 		}
 		h.sendMx.Unlock()
 
-		if timer == nil {
-			timer = time.NewTimer(datagramSendQueueFullTimeout)
-		} else {
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			timer.Reset(datagramSendQueueFullTimeout)
+		if deadline.IsZero() {
+			deadline = time.Now().Add(datagramSendQueueFullTimeout)
+			timer = time.NewTimer(time.Until(deadline))
 		}
 
 		select {
 		case <-h.closed:
-			// Connection closed while blocked on a full queue: the frame
-			// was never sent, return it to the pool.
+			// Connection closed while blocked on a full queue; the frame was
+			// never packed, so nothing references it: return it to the pool.
 			wire.PutDatagramFrame(f)
 			return h.closeErr
 		case <-h.sent:
@@ -212,6 +216,7 @@ func (h *datagramQueue) Add(f *wire.DatagramFrame) error {
 			// Queue stayed full with nothing dequeued for the whole timeout:
 			// the transport is stalled, not merely backpressured. Drop this
 			// datagram and surface a bounded error instead of parking forever.
+			// The frame was never packed: return it to the pool.
 			wire.PutDatagramFrame(f)
 			return ErrDatagramQueueFullTimeout
 		}
@@ -321,4 +326,19 @@ func (h *datagramQueue) Receive(ctx context.Context) ([]byte, error) {
 func (h *datagramQueue) CloseWithError(e error) {
 	h.closeErr = e
 	close(h.closed)
+	// Drain queued frames/buffers so they are released instead of sitting
+	// until GC. Packer and Receive stop after the connection run loop
+	// exits, so nothing else will consume these entries.
+	h.sendMx.Lock()
+	// Queued send frames were never packed, so nothing references them:
+	// return them to the pool.
+	for !h.sendQueue.Empty() {
+		wire.PutDatagramFrame(h.sendQueue.PopFront())
+	}
+	h.sendMx.Unlock()
+	h.rcvMx.Lock()
+	for !h.rcvQueue.Empty() {
+		getDatagramBufPool().Put(h.rcvQueue.PopFront())
+	}
+	h.rcvMx.Unlock()
 }

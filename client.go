@@ -24,13 +24,27 @@ func DialAddr(ctx context.Context, addr string, tlsConf *utls.Config, conf *Conf
 	}
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
+		// The owned socket was opened before resolution; release it so a
+		// retry loop cannot leak UDP descriptors (mirrors upstream PR #5259
+		// cleanup scope).
+		_ = udpConn.Close()
 		return nil, err
 	}
 	tr, err := setupTransport(udpConn, tlsConf, true)
 	if err != nil {
+		// setupTransport failure paths may not consume the socket.
+		_ = udpConn.Close()
 		return nil, err
 	}
-	return tr.dial(ctx, udpAddr, addr, tlsConf, conf, false)
+	conn, err := tr.dial(ctx, udpAddr, addr, tlsConf, conf, false)
+	if err != nil {
+		// This transport is single-use and owned by DialAddr; validation and
+		// connection-ID generation failures bypass the connection run loop
+		// that would otherwise release it (upstream PR #5259).
+		_ = tr.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 // DialAddrEarly establishes a new 0-RTT QUIC connection to a server.
@@ -42,10 +56,12 @@ func DialAddrEarly(ctx context.Context, addr string, tlsConf *utls.Config, conf 
 	}
 	udpAddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
+		_ = udpConn.Close()
 		return nil, err
 	}
 	tr, err := setupTransport(udpConn, tlsConf, true)
 	if err != nil {
+		_ = udpConn.Close()
 		return nil, err
 	}
 	conn, err := tr.dial(ctx, udpAddr, addr, tlsConf, conf, true)

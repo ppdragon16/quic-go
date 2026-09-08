@@ -305,6 +305,7 @@ func (h *sentPacketHandler) SentPacket(
 	p.LargestAcked = largestAcked
 	p.StreamFrames = streamFrames
 	p.Frames = frames
+	p.noRetransmittableFrames = len(frames) == 0 && len(streamFrames) == 0
 	p.IsPathMTUProbePacket = isPathMTUProbePacket
 	p.includedInBytesInFlight = true
 
@@ -888,6 +889,13 @@ func (h *sentPacketHandler) QueueProbePacket(encLevel protocol.EncryptionLevel) 
 
 func (h *sentPacketHandler) queueFramesForRetransmission(p *packet) {
 	if len(p.Frames) == 0 && len(p.StreamFrames) == 0 {
+		if p.noRetransmittableFrames {
+			// A DATAGRAM-only packet: ack-eliciting, so it participates in
+			// loss detection, but its frame is pooled after serialization and
+			// must not be retransmitted (RFC 9221). Losing it requeues
+			// nothing.
+			return
+		}
 		panic("no frames")
 	}
 	for _, f := range p.Frames {

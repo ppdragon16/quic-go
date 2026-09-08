@@ -102,6 +102,15 @@ func (m *outgoingStreamsMap[T]) OpenStreamSync(ctx context.Context) (T, error) {
 		case <-ctx.Done():
 			m.mutex.Lock()
 			delete(m.openQueue, queuePos)
+			// The canceled waiter may have been the notified one, or may have
+			// sat in front of the queue when a wake was delivered to it:
+			// hand the notification over so a freed stream slot is not
+			// stranded for the remaining waiters (no further MAX_STREAMS is
+			// guaranteed; see upstream quic-go PR #5037/#5660). Guarded by
+			// closeErr because CloseWithError closes the waiter channels.
+			if m.closeErr == nil && m.nextStream <= m.maxStream {
+				m.unblockOpenSync()
+			}
 			return *new(T), ctx.Err()
 		case <-waitChan:
 		}
@@ -109,6 +118,17 @@ func (m *outgoingStreamsMap[T]) OpenStreamSync(ctx context.Context) (T, error) {
 
 		if m.closeErr != nil {
 			return *new(T), m.closeErr
+		}
+		// The context may have been canceled after the wake was delivered but
+		// before we reacquired the mutex; Go's select can choose either ready
+		// case. Re-check so a canceled waiter never consumes a slot, and hand
+		// the wake over when it does.
+		if err := ctx.Err(); err != nil {
+			delete(m.openQueue, queuePos)
+			if m.nextStream <= m.maxStream {
+				m.unblockOpenSync()
+			}
+			return *new(T), err
 		}
 		if m.nextStream > m.maxStream {
 			// no stream available. Continue waiting

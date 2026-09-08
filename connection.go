@@ -23,7 +23,6 @@ import (
 	"github.com/daeuniverse/quic-go/internal/utils"
 	"github.com/daeuniverse/quic-go/internal/wire"
 	"github.com/daeuniverse/quic-go/logging"
-
 	quicpool "github.com/daeuniverse/quic-go/pool"
 )
 
@@ -331,7 +330,7 @@ var newConnection = func(
 		s.version,
 	)
 	s.cryptoStreamHandler = cs
-	s.packer = newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, s.receivedPacketHandler, s.datagramQueue, s.perspective)
+	s.packer = newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, s.receivedPacketHandler, s.datagramQueue, s.perspective, s.frameContentTracing())
 	s.unpacker = newPacketUnpacker(cs, s.srcConnIDLen)
 	s.cryptoStreamManager = newCryptoStreamManager(s.initialStream, s.handshakeStream, s.oneRTTStream)
 	return s
@@ -441,7 +440,7 @@ var newClientConnection = func(
 	s.cryptoStreamHandler = cs
 	s.cryptoStreamManager = newCryptoStreamManager(s.initialStream, s.handshakeStream, oneRTTStream)
 	s.unpacker = newPacketUnpacker(cs, s.srcConnIDLen)
-	s.packer = newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, s.receivedPacketHandler, s.datagramQueue, s.perspective)
+	s.packer = newPacketPacker(srcConnID, s.connIDManager.Get, s.initialStream, s.handshakeStream, s.sentPacketHandler, s.retransmissionQueue, cs, s.framer, s.receivedPacketHandler, s.datagramQueue, s.perspective, s.frameContentTracing())
 	if len(tlsConf.ServerName) > 0 {
 		s.tokenStoreKey = tlsConf.ServerName
 	} else {
@@ -499,6 +498,27 @@ func (s *connection) preSetup() {
 	s.connState.Version = s.version
 }
 
+// abortAfterStartupFailure finalizes a connection whose run loop failed
+// before the send queue was launched (StartHandshake or the initial
+// handshake-event processing). The normal shutdown path closes the crypto
+// handler and the send queue before handleCloseError, because the latter may
+// queue a CONNECTION_CLOSE for transmission; on startup failure nothing was
+// ever sent, so the finalizer must not touch the send queue (its Close waits
+// for Run to exit and would deadlock here) and must not transmit. Immediate
+// mode removes the registered connection IDs and closes the stream/datagram
+// machinery without sending; the tracer is closed exactly once. The deferred
+// context cancellation and queued-packet drain of run() still apply.
+func (s *connection) abortAfterStartupFailure(startupErr error) error {
+	s.cryptoStreamHandler.Close()
+	s.handleCloseError(&closeError{err: startupErr, immediate: true})
+	if s.tracer != nil && s.tracer.Close != nil {
+		s.tracer.Close()
+	}
+	s.logger.Infof("Connection %s closed.", s.logID)
+	s.timer.Stop()
+	return startupErr
+}
+
 // run the connection main loop
 func (s *connection) run() error {
 	var closeErr closeError
@@ -523,10 +543,10 @@ func (s *connection) run() error {
 	s.timer = *newTimer()
 
 	if err := s.cryptoStreamHandler.StartHandshake(s.ctx); err != nil {
-		return err
+		return s.abortAfterStartupFailure(err)
 	}
 	if err := s.handleHandshakeEvents(time.Now()); err != nil {
-		return err
+		return s.abortAfterStartupFailure(err)
 	}
 	go func() {
 		if err := s.sendQueue.Run(); err != nil {

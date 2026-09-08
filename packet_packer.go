@@ -37,8 +37,14 @@ type sealer interface {
 type payload struct {
 	streamFrames []ackhandler.StreamFrame
 	frames       []ackhandler.Frame
-	ack          *wire.AckFrame
-	length       protocol.ByteCount
+	// datagram rides outside frames: it is pooled right after serialization
+	// and must not be retained by the sent-packet history (RFC 9221: never
+	// retransmitted). See appendPacketPayload.
+	datagram *wire.DatagramFrame
+	ack      *wire.AckFrame
+	length   protocol.ByteCount
+	// set by appendPacketPayload before the datagram is pooled
+	ackEliciting bool
 }
 
 type longHeaderPacket struct {
@@ -57,6 +63,9 @@ type shortHeaderPacket struct {
 	Ack                  *wire.AckFrame
 	Length               protocol.ByteCount
 	IsPathMTUProbePacket bool
+	// precomputed at pack time: a pooled DATAGRAM frame does not survive in
+	// Frames, so deriving this from Frames later would miss it.
+	AckEliciting bool
 
 	// used for logging
 	DestConnID      protocol.ConnectionID
@@ -64,7 +73,7 @@ type shortHeaderPacket struct {
 	KeyPhase        protocol.KeyPhaseBit
 }
 
-func (p *shortHeaderPacket) IsAckEliciting() bool { return ackhandler.HasAckElicitingFrames(p.Frames) }
+func (p *shortHeaderPacket) IsAckEliciting() bool { return p.AckEliciting }
 
 type coalescedPacket struct {
 	buffer         *packetBuffer
@@ -131,6 +140,11 @@ type packetPacker struct {
 	acks                ackFrameSource
 	datagramQueue       *datagramQueue
 	retransmissionQueue *retransmissionQueue
+	// frameContentTracing mirrors whether anything reads frame contents
+	// after packing (qlog tracer or debug logging). When set, pooled
+	// send-side DATAGRAM frames are snapshotted before they return to the
+	// pool; when clear (normal operation) nothing reads them.
+	frameContentTracing bool
 	rand                rand.Rand
 
 	numNonAckElicitingAcks int
@@ -149,6 +163,7 @@ func newPacketPacker(
 	acks ackFrameSource,
 	datagramQueue *datagramQueue,
 	perspective protocol.Perspective,
+	frameContentTracing bool,
 ) *packetPacker {
 	var b [8]byte
 	_, _ = crand.Read(b[:])
@@ -166,6 +181,7 @@ func newPacketPacker(
 		acks:                acks,
 		rand:                *rand.New(rand.NewSource(binary.BigEndian.Uint64(b[:]))),
 		pnManager:           packetNumberManager,
+		frameContentTracing: frameContentTracing,
 	}
 }
 
@@ -609,7 +625,14 @@ func (p *packetPacker) maybeGetAppDataPacket(
 ) payload {
 	pl := p.composeNextPacket(maxPayloadSize, onlyAck, ackAllowed, now, v)
 
-	// check if we have anything to send
+	// check if we have anything to send.
+	// A queued DATAGRAM counts as something to send even though it no longer
+	// rides in the retained frame list -- and it makes the packet
+	// ack-eliciting, so the non-ack-eliciting-ACK counter resets.
+	if pl.datagram != nil {
+		p.numNonAckElicitingAcks = 0
+		return pl
+	}
 	if len(pl.frames) == 0 && len(pl.streamFrames) == 0 {
 		if pl.ack == nil {
 			return payload{}
@@ -659,16 +682,14 @@ func (p *packetPacker) composeNextPacket(
 		if f := p.datagramQueue.Peek(); f != nil {
 			size := f.Length(v)
 			if size <= maxFrameSize-pl.length { // DATAGRAM frame fits
-				if pl.frames == nil {
-					pl.frames = ackhandler.GetFrames()
-				}
-				pl.frames = append(pl.frames, ackhandler.Frame{Frame: f})
+				pl.datagram = f
 				pl.length += size
 				p.datagramQueue.Pop()
 			} else if !hasAck {
 				// The DATAGRAM frame doesn't fit, and the packet doesn't contain an ACK.
 				// Discard this frame. There's no point in retrying this in the next packet,
 				// as it's unlikely that the available packet size will increase.
+				// The frame was dropped, never packed: return it to the pool.
 				wire.PutDatagramFrame(f)
 				p.datagramQueue.Pop()
 			}
@@ -858,7 +879,7 @@ func (p *packetPacker) appendLongHeaderPacket(buffer *packetBuffer, header *wire
 	}
 	payloadOffset := protocol.ByteCount(len(raw))
 
-	raw, err = p.appendPacketPayload(raw, pl, paddingLen, v)
+	raw, pl, err = p.appendPacketPayload(raw, pl, paddingLen, v)
 	if err != nil {
 		return nil, err
 	}
@@ -903,7 +924,7 @@ func (p *packetPacker) appendShortHeaderPacket(
 	}
 	payloadOffset := protocol.ByteCount(len(raw))
 
-	raw, err = p.appendPacketPayload(raw, pl, paddingLen, v)
+	raw, pl, err = p.appendPacketPayload(raw, pl, paddingLen, v)
 	if err != nil {
 		return shortHeaderPacket{}, err
 	}
@@ -928,18 +949,19 @@ func (p *packetPacker) appendShortHeaderPacket(
 		Length:               protocol.ByteCount(len(raw)),
 		DestConnID:           connID,
 		IsPathMTUProbePacket: isMTUProbePacket,
+		AckEliciting:         pl.ackEliciting,
 	}, nil
 }
 
 // appendPacketPayload serializes the payload of a packet into the raw byte slice.
 // It modifies the order of payload.frames.
-func (p *packetPacker) appendPacketPayload(raw []byte, pl payload, paddingLen protocol.ByteCount, v protocol.Version) ([]byte, error) {
+func (p *packetPacker) appendPacketPayload(raw []byte, pl payload, paddingLen protocol.ByteCount, v protocol.Version) ([]byte, payload, error) {
 	payloadOffset := len(raw)
 	if pl.ack != nil {
 		var err error
 		raw, err = pl.ack.Append(raw, v)
 		if err != nil {
-			return nil, err
+			return nil, pl, err
 		}
 	}
 	if paddingLen > 0 {
@@ -950,31 +972,53 @@ func (p *packetPacker) appendPacketPayload(raw []byte, pl payload, paddingLen pr
 	if len(pl.frames) > 1 {
 		p.rand.Shuffle(len(pl.frames), func(i, j int) { pl.frames[i], pl.frames[j] = pl.frames[j], pl.frames[i] })
 	}
+	// The ack-eliciting flag must be derived before the datagram is pooled:
+	// it no longer rides in the retained frame list, and it is the one
+	// property of a DATAGRAM frame the sent-packet history still needs.
+	pl.ackEliciting = pl.datagram != nil || ackhandler.HasAckElicitingFrames(pl.frames)
 	for _, f := range pl.frames {
 		var err error
 		raw, err = f.Frame.Append(raw, v)
 		if err != nil {
-			return nil, err
+			return nil, pl, err
 		}
-		// DATAGRAM frames are never retransmitted (RFC 9221): once packed
-		// into the packet buffer they are not referenced anymore, so the
-		// frame (and its pooled Data) can return to the pool.
-		if df, ok := f.Frame.(*wire.DatagramFrame); ok {
-			wire.PutDatagramFrame(df)
+	}
+	if pl.datagram != nil {
+		var err error
+		raw, err = pl.datagram.Append(raw, v)
+		if err != nil {
+			return nil, pl, err
 		}
+		// Send-side DATAGRAM frames are pooled (see connection.SendDatagram):
+		// the payload has been serialized into the packet buffer, so the
+		// frame -- and its Data buffer -- can return to the pool here. It is
+		// deliberately NOT retained by the sent-packet history (never
+		// retransmitted, RFC 9221), so nothing reads it afterwards. When
+		// tracing or debug logging is enabled, hand them an owned snapshot.
+		if p.frameContentTracing {
+			cp := *pl.datagram
+			cp.Data = make([]byte, len(pl.datagram.Data))
+			copy(cp.Data, pl.datagram.Data)
+			if pl.frames == nil {
+				pl.frames = ackhandler.GetFrames()
+			}
+			pl.frames = append(pl.frames, ackhandler.Frame{Frame: &cp})
+		}
+		wire.PutDatagramFrame(pl.datagram)
+		pl.datagram = nil
 	}
 	for _, f := range pl.streamFrames {
 		var err error
 		raw, err = f.Frame.Append(raw, v)
 		if err != nil {
-			return nil, err
+			return nil, pl, err
 		}
 	}
 
 	if payloadSize := protocol.ByteCount(len(raw)-payloadOffset) - paddingLen; payloadSize != pl.length {
-		return nil, fmt.Errorf("PacketPacker BUG: payload size inconsistent (expected %d, got %d bytes)", pl.length, payloadSize)
+		return nil, pl, fmt.Errorf("PacketPacker BUG: payload size inconsistent (expected %d, got %d bytes)", pl.length, payloadSize)
 	}
-	return raw, nil
+	return raw, pl, nil
 }
 
 func (p *packetPacker) encryptPacket(raw []byte, sealer sealer, pn protocol.PacketNumber, payloadOffset, pnLen protocol.ByteCount) []byte {

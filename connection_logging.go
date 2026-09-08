@@ -50,6 +50,17 @@ func toLoggingAckFrame(f *wire.AckFrame) *logging.AckFrame {
 	return ack
 }
 
+// frameContentTracing reports whether anything reads frame contents after a
+// packet has been packed (qlog tracing or debug logging). Pooled send-side
+// DATAGRAM frames are snapshotted before returning to the pool when it does.
+func (s *connection) frameContentTracing() bool {
+	if s.logger.Debug() {
+		return true
+	}
+	return s.tracer != nil &&
+		(s.tracer.SentShortHeaderPacket != nil || s.tracer.SentLongHeaderPacket != nil)
+}
+
 func (s *connection) logLongHeaderPacket(p *longHeaderPacket, ecn protocol.ECN) {
 	// quic-go logging
 	if s.logger.Debug() {
