@@ -4,6 +4,7 @@ import (
 	"net"
 	"net/netip"
 	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
@@ -68,6 +69,44 @@ func TestSendConnDetectGSOFailure(t *testing.T) {
 	)
 	require.NoError(t, c.Write([]byte("foobar"), 4, protocol.ECNCE))
 	require.False(t, c.capabilities().GSO)
+}
+
+// quic-go#4228: gotGSOError is stored by the sendQueue goroutine (sconn.Write
+// on a GSO error) and concurrently read by the connection's run loop and by
+// ConnectionState via capabilities(). Run both access paths concurrently so
+// the race detector flags any loss of synchronization.
+func TestSconnConcurrentCapabilitiesAndGSOError(t *testing.T) {
+	if !platformSupportsGSO {
+		t.Skip("GSO is not supported on this platform")
+	}
+
+	remoteAddr := &net.UDPAddr{IP: net.IPv4(192, 168, 100, 200), Port: 1337}
+	rawConn := NewMockRawConn(gomock.NewController(t))
+	rawConn.EXPECT().LocalAddr()
+	// GSO must be reported enabled: capabilities() only reads gotGSOError
+	// when GSO is still on — the read is what races with the store in Write.
+	rawConn.EXPECT().capabilities().Return(connCapabilities{GSO: true}).AnyTimes()
+	// Every write fails with a GSO error, so every sconn.Write takes the
+	// fallback path and stores gotGSOError.
+	rawConn.EXPECT().WritePacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(0, errGSO).AnyTimes()
+	c := newSendConn(rawConn, remoteAddr, packetInfo{}, utils.DefaultLogger)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			// Errors are expected here; only the concurrent flag access matters.
+			_ = c.Write([]byte("foobar"), 1200, protocol.ECT1)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 500; i++ {
+			_ = c.capabilities().GSO
+		}
+	}()
+	wg.Wait()
 }
 
 func TestSendConnSendmsgFailures(t *testing.T) {

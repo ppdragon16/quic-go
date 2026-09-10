@@ -29,9 +29,17 @@ type sconn struct {
 
 	packetInfoOOB []byte
 	// If GSO enabled, and we receive a GSO error for this remote address, GSO is disabled.
-	gotGSOError bool
+	// Stored from the sendQueue goroutine (Write) and read from the
+	// connection's run loop and application goroutines (capabilities),
+	// so it must be atomic (quic-go#4228). The check-then-batch race this
+	// leaves open is benign by design: a GSO batch composed concurrently
+	// with the flip is still drained packet-by-packet by the fallback in
+	// Write; the flag only disables future batching.
+	gotGSOError atomic.Bool
 	// Used to catch the error sometimes returned by the first sendmsg call on Linux,
 	// see https://github.com/golang/go/issues/63322.
+	// Only accessed from the sendQueue goroutine: every packet write goes
+	// through sendQueue.Run, so no synchronization is required.
 	wroteFirstPacket bool
 }
 
@@ -71,7 +79,7 @@ func (c *sconn) Write(p []byte, gsoSize uint16, ecn protocol.ECN) error {
 	err := c.writePacket(p, remoteAddr, c.packetInfoOOB, gsoSize, ecn)
 	if err != nil && isGSOError(err) {
 		// disable GSO for future calls
-		c.gotGSOError = true
+		c.gotGSOError.Store(true)
 		if c.logger.Debug() {
 			c.logger.Debugf("GSO failed when sending to %s", remoteAddr)
 		}
@@ -103,7 +111,7 @@ func (c *sconn) writePacket(p []byte, addr net.Addr, oob []byte, gsoSize uint16,
 func (c *sconn) capabilities() connCapabilities {
 	capabilities := c.rawConn.capabilities()
 	if capabilities.GSO {
-		capabilities.GSO = !c.gotGSOError
+		capabilities.GSO = !c.gotGSOError.Load()
 	}
 	return capabilities
 }
