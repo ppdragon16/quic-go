@@ -1,6 +1,7 @@
 package http3
 
 import (
+	"bytes"
 	"context"
 	xtls "crypto/tls"
 	"errors"
@@ -74,6 +75,16 @@ func versionToALPN(v protocol.Version) string {
 // utls.Config adds the functionality of detecting the used QUIC version
 // in order to set the correct ALPN value for the http3 connection.
 func ConfigureTLSConfig(tlsConf *utls.Config) *utls.Config {
+	return configureTLSConfig(tlsConf, nil)
+}
+
+// configureTLSConfig is ConfigureTLSConfig with an extra hook that is applied to
+// both the config passed in and any config returned by GetConfigForClient (the
+// latter is the one the QUIC stack actually uses for the handshake).
+func configureTLSConfig(tlsConf *utls.Config, configure func(*utls.Config)) *utls.Config {
+	if configure != nil {
+		configure(tlsConf)
+	}
 	// The utls.Config used to setup the quic.Listener needs to have the GetConfigForClient callback set.
 	// That way, we can get the QUIC version and set the correct ALPN value.
 	return &utls.Config{
@@ -105,8 +116,54 @@ func ConfigureTLSConfig(tlsConf *utls.Config) *utls.Config {
 
 			config = config.Clone()
 			config.NextProtos = []string{proto}
+			if configure != nil {
+				configure(config)
+			}
 			return config, nil
 		},
+	}
+}
+
+// configureTLSConfig returns a TLS config that embeds the SETTINGS this server
+// currently sends into session tickets, and rejects 0-RTT on resumption when
+// those settings are missing or incompatible with the current ones (fail
+// closed, so a client can never send 0-RTT requests the server cannot serve).
+func (s *Server) configureTLSConfig(tlsConf *utls.Config) *utls.Config {
+	settings := s.settings()
+	settingsExtra := settingsForSessionTicket(settings)
+	return configureTLSConfig(tlsConf, func(config *utls.Config) {
+		wrapSession := config.WrapSession
+		if wrapSession == nil {
+			wrapSession = config.EncryptTicket
+		}
+		config.WrapSession = func(cs utls.ConnectionState, ss *utls.SessionState) ([]byte, error) {
+			ss.Extra = append(ss.Extra, bytes.Clone(settingsExtra))
+			return wrapSession(cs, ss)
+		}
+		unwrapSession := config.UnwrapSession
+		if unwrapSession == nil {
+			unwrapSession = config.DecryptTicket
+		}
+		config.UnwrapSession = func(identity []byte, cs utls.ConnectionState) (*utls.SessionState, error) {
+			ss, err := unwrapSession(identity, cs)
+			if err != nil || ss == nil || !ss.EarlyData {
+				return ss, err
+			}
+			settingsData, ok := settingsDataFromSessionTicket(ss.Extra)
+			if !ok || !settingsCompatibleFor0RTT(settingsData, settings) {
+				ss.EarlyData = false
+			}
+			return ss, nil
+		}
+	})
+}
+
+// settings returns the HTTP/3 settings this server sends to every connection.
+func (s *Server) settings() *settings {
+	return &settings{
+		Datagram:        s.EnableDatagrams,
+		ExtendedConnect: true,
+		Other:           s.AdditionalSettings,
 	}
 }
 
@@ -350,7 +407,7 @@ func (s *Server) setupListenerForConn(tlsConf *utls.Config, conn net.PacketConn)
 		return nil, errServerWithoutTLSConfig
 	}
 
-	baseConf := ConfigureTLSConfig(tlsConf)
+	baseConf := s.configureTLSConfig(tlsConf)
 	quicConf := s.QUICConfig
 	if quicConf == nil {
 		quicConf = &quic.Config{Allow0RTT: true}
@@ -502,11 +559,7 @@ func (s *Server) handleConn(conn quic.Connection) error {
 	}
 	b := make([]byte, 0, 64)
 	b = quicvarint.Append(b, streamTypeControlStream) // stream type
-	b = (&settingsFrame{
-		Datagram:        s.EnableDatagrams,
-		ExtendedConnect: true,
-		Other:           s.AdditionalSettings,
-	}).Append(b)
+	b = s.settings().Append(b)
 	ctrlStr.Write(b)
 
 	ctx := conn.Context()
