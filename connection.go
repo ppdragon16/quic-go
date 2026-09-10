@@ -153,7 +153,7 @@ type connection struct {
 
 	maxPayloadSizeEstimate atomic.Uint32
 
-	initialStream       *cryptoStream
+	initialStream       *initialCryptoStream
 	handshakeStream     *cryptoStream
 	oneRTTStream        *cryptoStream // only set for the server
 	cryptoStreamHandler cryptoStreamHandler
@@ -455,7 +455,7 @@ var newClientConnection = func(
 }
 
 func (s *connection) preSetup() {
-	s.initialStream = newCryptoStream()
+	s.initialStream = newInitialCryptoStream(s.perspective == protocol.PerspectiveClient)
 	s.handshakeStream = newCryptoStream()
 	s.sendQueue = newSendQueue(s.conn)
 	s.retransmissionQueue = newRetransmissionQueue()

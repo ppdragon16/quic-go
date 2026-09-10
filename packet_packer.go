@@ -130,7 +130,7 @@ type packetPacker struct {
 	perspective protocol.Perspective
 	cryptoSetup sealingManager
 
-	initialStream   *cryptoStream
+	initialStream   *initialCryptoStream
 	handshakeStream *cryptoStream
 
 	token []byte
@@ -155,7 +155,8 @@ var _ packer = &packetPacker{}
 func newPacketPacker(
 	srcConnID protocol.ConnectionID,
 	getDestConnID func() protocol.ConnectionID,
-	initialStream, handshakeStream *cryptoStream,
+	initialStream *initialCryptoStream,
+	handshakeStream *cryptoStream,
 	packetNumberManager packetNumberManager,
 	retransmissionQueue *retransmissionQueue,
 	cryptoSetup sealingManager,
@@ -530,27 +531,32 @@ func (p *packetPacker) maybeGetCryptoPacket(
 		return nil, payload{}
 	}
 
-	var s *cryptoStream
+	// The initial crypto stream may have to split the ClientHello (scrambling),
+	// so ask it for data and pop frames through function values instead of
+	// through a single *cryptoStream.
+	var hasCryptoData func() bool
+	var popCryptoFrame func(maxLen protocol.ByteCount) *wire.CryptoFrame
 	var handler ackhandler.FrameHandler
 	var hasRetransmission bool
 	//nolint:exhaustive // Initial and Handshake are the only two encryption levels here.
 	switch encLevel {
 	case protocol.EncryptionInitial:
-		s = p.initialStream
+		hasCryptoData = p.initialStream.HasData
+		popCryptoFrame = p.initialStream.PopCryptoFrame
 		handler = p.retransmissionQueue.InitialAckHandler()
 		hasRetransmission = p.retransmissionQueue.HasInitialData()
 	case protocol.EncryptionHandshake:
-		s = p.handshakeStream
+		hasCryptoData = p.handshakeStream.HasData
+		popCryptoFrame = p.handshakeStream.PopCryptoFrame
 		handler = p.retransmissionQueue.HandshakeAckHandler()
 		hasRetransmission = p.retransmissionQueue.HasHandshakeData()
 	}
 
-	hasData := s.HasData()
 	var ack *wire.AckFrame
 	if ackAllowed {
-		ack = p.acks.GetAckFrame(encLevel, now, !hasRetransmission && !hasData)
+		ack = p.acks.GetAckFrame(encLevel, now, !hasRetransmission && !hasCryptoData())
 	}
-	if !hasData && !hasRetransmission && ack == nil {
+	if !hasCryptoData() && !hasRetransmission && ack == nil {
 		// nothing to send
 		return nil, payload{}
 	}
@@ -583,10 +589,16 @@ func (p *packetPacker) maybeGetCryptoPacket(
 			pl.length += frameLen
 			maxPacketSize -= frameLen
 		}
-	} else if s.HasData() {
-		cf := s.PopCryptoFrame(maxPacketSize)
-		pl.frames = []ackhandler.Frame{{Frame: cf, Handler: handler}}
-		pl.length += cf.Length(v)
+	} else {
+		for hasCryptoData() {
+			cf := popCryptoFrame(maxPacketSize)
+			if cf == nil {
+				break
+			}
+			pl.frames = append(pl.frames, ackhandler.Frame{Frame: cf, Handler: handler})
+			pl.length += cf.Length(v)
+			maxPacketSize -= cf.Length(v)
+		}
 	}
 	return hdr, pl
 }
