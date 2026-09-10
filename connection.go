@@ -2361,6 +2361,12 @@ func (s *connection) onHasStreamData(id protocol.StreamID, str sendStreamI) {
 	s.scheduleSending()
 }
 
+// updateStreamPriority re-queues a stream after its RFC 9218 priority changed.
+func (s *connection) updateStreamPriority(id protocol.StreamID) {
+	s.framer.UpdateStreamPriority(id)
+	s.scheduleSending()
+}
+
 func (s *connection) onHasStreamControlFrame(id protocol.StreamID, str streamControlFrameGetter) {
 	s.framer.AddStreamWithControlFrames(id, str)
 	s.scheduleSending()

@@ -139,6 +139,15 @@ type SendStream interface {
 	// some data was successfully written.
 	// A zero value for t means Write will not time out.
 	SetWriteDeadline(t time.Time) error
+	// SetPriority sets the scheduling priority of the data sent on this stream,
+	// using the urgency and incremental parameters defined by RFC 9218.
+	//
+	// Urgency is clipped to the range 0 through 7, lower values are sent first.
+	// Within one urgency level, incremental streams are scheduled round-robin,
+	// while non-incremental streams are scheduled in stream ID order.
+	//
+	// The default is urgency 3 and incremental, i.e. plain round-robin.
+	SetPriority(urgency int8, incremental bool)
 }
 
 // A Connection is a QUIC connection between two peers.

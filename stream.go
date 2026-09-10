@@ -26,6 +26,9 @@ var errDeadline net.Error = &deadlineError{}
 type streamSender interface {
 	onHasConnectionData()
 	onHasStreamData(protocol.StreamID, sendStreamI)
+	// updateStreamPriority is called when a stream's scheduling priority
+	// changed (RFC 9218), so the framer can re-queue the stream.
+	updateStreamPriority(protocol.StreamID)
 	onHasStreamControlFrame(protocol.StreamID, streamControlFrameGetter)
 	// must be called without holding the mutex that is acquired by closeForShutdown
 	onStreamCompleted(protocol.StreamID)
@@ -42,6 +45,9 @@ type uniStreamSender struct {
 func (s *uniStreamSender) onHasStreamData(id protocol.StreamID, str sendStreamI) {
 	s.streamSender.onHasStreamData(id, str)
 }
+func (s *uniStreamSender) updateStreamPriority(id protocol.StreamID) {
+	s.streamSender.updateStreamPriority(id)
+}
 func (s *uniStreamSender) onStreamCompleted(protocol.StreamID) { s.onStreamCompletedImpl() }
 func (s *uniStreamSender) onHasStreamControlFrame(id protocol.StreamID, str streamControlFrameGetter) {
 	s.onHasStreamControlFrameImpl(id, str)
@@ -57,6 +63,7 @@ type streamI interface {
 	handleResetStreamFrame(*wire.ResetStreamFrame, time.Time) error
 	// for sending
 	hasData() bool
+	priority() (urgency int8, incremental bool, generation uint32)
 	handleStopSendingFrame(*wire.StopSendingFrame)
 	popStreamFrame(protocol.ByteCount, protocol.Version) (_ ackhandler.StreamFrame, _ *wire.StreamDataBlockedFrame, hasMore bool)
 	updateSendWindow(protocol.ByteCount)

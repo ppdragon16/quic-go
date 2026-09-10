@@ -16,7 +16,6 @@ import (
 
 	ackhandler "github.com/daeuniverse/quic-go/internal/ackhandler"
 	protocol "github.com/daeuniverse/quic-go/internal/protocol"
-	qerr "github.com/daeuniverse/quic-go/internal/qerr"
 	wire "github.com/daeuniverse/quic-go/internal/wire"
 	gomock "go.uber.org/mock/gomock"
 )
@@ -46,7 +45,7 @@ func (m *MockSendStreamI) EXPECT() *MockSendStreamIMockRecorder {
 }
 
 // CancelWrite mocks base method.
-func (m *MockSendStreamI) CancelWrite(arg0 qerr.StreamErrorCode) {
+func (m *MockSendStreamI) CancelWrite(arg0 StreamErrorCode) {
 	m.ctrl.T.Helper()
 	m.ctrl.Call(m, "CancelWrite", arg0)
 }
@@ -70,13 +69,13 @@ func (c *MockSendStreamICancelWriteCall) Return() *MockSendStreamICancelWriteCal
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSendStreamICancelWriteCall) Do(f func(qerr.StreamErrorCode)) *MockSendStreamICancelWriteCall {
+func (c *MockSendStreamICancelWriteCall) Do(f func(StreamErrorCode)) *MockSendStreamICancelWriteCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSendStreamICancelWriteCall) DoAndReturn(f func(qerr.StreamErrorCode)) *MockSendStreamICancelWriteCall {
+func (c *MockSendStreamICancelWriteCall) DoAndReturn(f func(StreamErrorCode)) *MockSendStreamICancelWriteCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -157,6 +156,42 @@ func (c *MockSendStreamIContextCall) DoAndReturn(f func() context.Context) *Mock
 	return c
 }
 
+// SetPriority mocks base method.
+func (m *MockSendStreamI) SetPriority(urgency int8, incremental bool) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "SetPriority", urgency, incremental)
+}
+
+// SetPriority indicates an expected call of SetPriority.
+func (mr *MockSendStreamIMockRecorder) SetPriority(urgency, incremental any) *MockSendStreamISetPriorityCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetPriority", reflect.TypeOf((*MockSendStreamI)(nil).SetPriority), urgency, incremental)
+	return &MockSendStreamISetPriorityCall{Call: call}
+}
+
+// MockSendStreamISetPriorityCall wrap *gomock.Call
+type MockSendStreamISetPriorityCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSendStreamISetPriorityCall) Return() *MockSendStreamISetPriorityCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSendStreamISetPriorityCall) Do(f func(int8, bool)) *MockSendStreamISetPriorityCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSendStreamISetPriorityCall) DoAndReturn(f func(int8, bool)) *MockSendStreamISetPriorityCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // SetWriteDeadline mocks base method.
 func (m *MockSendStreamI) SetWriteDeadline(t time.Time) error {
 	m.ctrl.T.Helper()
@@ -196,10 +231,10 @@ func (c *MockSendStreamISetWriteDeadlineCall) DoAndReturn(f func(time.Time) erro
 }
 
 // StreamID mocks base method.
-func (m *MockSendStreamI) StreamID() protocol.StreamID {
+func (m *MockSendStreamI) StreamID() StreamID {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "StreamID")
-	ret0, _ := ret[0].(protocol.StreamID)
+	ret0, _ := ret[0].(StreamID)
 	return ret0
 }
 
@@ -216,19 +251,19 @@ type MockSendStreamIStreamIDCall struct {
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockSendStreamIStreamIDCall) Return(arg0 protocol.StreamID) *MockSendStreamIStreamIDCall {
+func (c *MockSendStreamIStreamIDCall) Return(arg0 StreamID) *MockSendStreamIStreamIDCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockSendStreamIStreamIDCall) Do(f func() protocol.StreamID) *MockSendStreamIStreamIDCall {
+func (c *MockSendStreamIStreamIDCall) Do(f func() StreamID) *MockSendStreamIStreamIDCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockSendStreamIStreamIDCall) DoAndReturn(f func() protocol.StreamID) *MockSendStreamIStreamIDCall {
+func (c *MockSendStreamIStreamIDCall) DoAndReturn(f func() StreamID) *MockSendStreamIStreamIDCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -418,6 +453,46 @@ func (c *MockSendStreamIpopStreamFrameCall) Do(f func(protocol.ByteCount, protoc
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockSendStreamIpopStreamFrameCall) DoAndReturn(f func(protocol.ByteCount, protocol.Version) (ackhandler.StreamFrame, *wire.StreamDataBlockedFrame, bool)) *MockSendStreamIpopStreamFrameCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// priority mocks base method.
+func (m *MockSendStreamI) priority() (int8, bool, uint32) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "priority")
+	ret0, _ := ret[0].(int8)
+	ret1, _ := ret[1].(bool)
+	ret2, _ := ret[2].(uint32)
+	return ret0, ret1, ret2
+}
+
+// priority indicates an expected call of priority.
+func (mr *MockSendStreamIMockRecorder) priority() *MockSendStreamIpriorityCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "priority", reflect.TypeOf((*MockSendStreamI)(nil).priority))
+	return &MockSendStreamIpriorityCall{Call: call}
+}
+
+// MockSendStreamIpriorityCall wrap *gomock.Call
+type MockSendStreamIpriorityCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSendStreamIpriorityCall) Return(urgency int8, incremental bool, generation uint32) *MockSendStreamIpriorityCall {
+	c.Call = c.Call.Return(urgency, incremental, generation)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSendStreamIpriorityCall) Do(f func() (int8, bool, uint32)) *MockSendStreamIpriorityCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSendStreamIpriorityCall) DoAndReturn(f func() (int8, bool, uint32)) *MockSendStreamIpriorityCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

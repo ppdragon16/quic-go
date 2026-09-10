@@ -16,10 +16,20 @@ import (
 	quicpool "github.com/daeuniverse/quic-go/pool"
 )
 
+// defaultUrgency is the RFC 9218 urgency used until SetPriority is called.
+// RFC 9218 itself defaults incremental to false; we keep the previous
+// behaviour (round-robin) to avoid changing scheduling for existing users.
+const defaultUrgency = 3
+
 type sendStreamI interface {
 	SendStream
 	handleStopSendingFrame(*wire.StopSendingFrame)
 	hasData() bool
+	// priority returns the RFC 9218 urgency, the incremental flag and the
+	// generation of the current priority setting. The generation changes
+	// whenever the priority is updated, so the framer can discard queue entries
+	// that refer to an outdated priority.
+	priority() (urgency int8, incremental bool, generation uint32)
 	popStreamFrame(protocol.ByteCount, protocol.Version) (_ ackhandler.StreamFrame, _ *wire.StreamDataBlockedFrame, hasMore bool)
 	closeForShutdown(error)
 	updateSendWindow(protocol.ByteCount)
@@ -36,6 +46,11 @@ type sendStream struct {
 
 	streamID protocol.StreamID
 	sender   streamSender
+
+	// RFC 9218 stream priority
+	urgency            int8
+	incremental        bool
+	priorityGeneration uint32
 
 	writeOffset protocol.ByteCount
 
@@ -57,9 +72,9 @@ type sendStream struct {
 	dataForWriting []byte // during a Write() call, this slice is the part of p that still needs to be sent out
 	nextFrame      *wire.StreamFrame
 
-	writeChan chan struct{}
-	writeOnce chan struct{}
-	deadline  time.Time
+	writeChan     chan struct{}
+	writeOnce     chan struct{}
+	deadline      time.Time
 	deadlineTimer *utils.Timer // lazily allocated, reused across Write calls
 
 	flowController flowcontrol.StreamFlowController
@@ -81,6 +96,8 @@ func newSendStream(
 		streamID:       streamID,
 		sender:         sender,
 		flowController: flowController,
+		urgency:        defaultUrgency,
+		incremental:    true,
 		writeChan:      make(chan struct{}, 1),
 		writeOnce:      make(chan struct{}, 1), // cap: 1, to protect against concurrent use of Write
 	}
@@ -90,6 +107,35 @@ func newSendStream(
 
 func (s *sendStream) StreamID() protocol.StreamID {
 	return s.streamID // same for receiveStream and sendStream
+}
+
+// SetPriority sets the scheduling priority of the data sent on this stream,
+// using the urgency and incremental parameters defined by RFC 9218.
+// Urgency is clipped to the range 0 through 7, lower values are sent first.
+// Within one urgency level, incremental streams are scheduled round-robin,
+// while non-incremental streams are scheduled in stream ID order.
+func (s *sendStream) SetPriority(urgency int8, incremental bool) {
+	var changed bool
+	s.mutex.Lock()
+	urgency = max(0, min(urgency, 7))
+	if s.urgency != urgency || s.incremental != incremental {
+		s.urgency = urgency
+		s.incremental = incremental
+		s.priorityGeneration++
+		changed = true
+	}
+	s.mutex.Unlock()
+
+	if changed {
+		// must be called without holding the mutex
+		s.sender.updateStreamPriority(s.streamID)
+	}
+}
+
+func (s *sendStream) priority() (urgency int8, incremental bool, generation uint32) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.urgency, s.incremental, s.priorityGeneration
 }
 
 func (s *sendStream) Write(p []byte) (int, error) {
