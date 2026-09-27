@@ -106,6 +106,9 @@ func newServerTestConnection(
 	sendConn.EXPECT().capabilities().Return(connCapabilities{GSO: gso}).AnyTimes()
 	sendConn.EXPECT().RemoteAddr().Return(remoteAddr).AnyTimes()
 	sendConn.EXPECT().LocalAddr().Return(localAddr).AnyTimes()
+	// server-side connections update the peer address on every processed
+	// packet (connection migration)
+	sendConn.EXPECT().SetRemoteAddr(gomock.Any()).AnyTimes()
 	packer := NewMockPacker(mockCtrl)
 	b := make([]byte, 12)
 	rand.Read(b)
@@ -2265,7 +2268,9 @@ func TestConnectionCongestionControl(t *testing.T) {
 	tc.packer.EXPECT().PackAckOnlyPacket(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(protocol.ByteCount, time.Time, protocol.Version) (shortHeaderPacket, *packetBuffer, error) {
 			close(done2)
-			return shortHeaderPacket{}, nil, errNothingToPack
+			// the real packer acquires the buffer before packing and hands it
+			// back even on errNothingToPack; the connection releases it
+			return shortHeaderPacket{}, getPacketBuffer(), errNothingToPack
 		},
 	)
 	tc.conn.scheduleSending()

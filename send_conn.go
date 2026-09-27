@@ -121,8 +121,15 @@ func (c *sconn) capabilities() connCapabilities {
 	return capabilities
 }
 
-func (c *sconn) RemoteAddr() net.Addr { return c.remoteAddr.Load().(net.Addr) }
-func (c *sconn) LocalAddr() net.Addr  { return c.localAddr }
+func (c *sconn) RemoteAddr() net.Addr {
+	if v := c.remoteAddr.Load(); v != nil {
+		return v.(net.Addr)
+	}
+	// A send conn created without a remote (e.g. Transport.Dial logs it before
+	// the first packet set the peer) has none.
+	return nil
+}
+func (c *sconn) LocalAddr() net.Addr { return c.localAddr }
 
 // SetRemoteAddr publishes addr as the connection's remote address.
 //

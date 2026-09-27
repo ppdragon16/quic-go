@@ -268,20 +268,23 @@ func TestDatagramQueueCloseWithErrorDrainsQueuedFrames(t *testing.T) {
 // capacity across many receive/release/enqueue cycles.
 func TestReceiveQueueStorageBoundedWithoutFullDrain(t *testing.T) {
 	q := newDatagramQueue(nil, nil)
-	f := &wire.DatagramFrame{Data: make([]byte, 64)}
+	// HandleDatagramFrame takes ownership of the frame (its payload is copied
+	// and the frame is returned to the wire pool), so every call gets a fresh
+	// frame.
+	newFrame := func() *wire.DatagramFrame { return &wire.DatagramFrame{Data: make([]byte, 64)} }
 
 	// Seed two entries, then run many cycles that keep at least one entry
 	// queued at every enqueue (the old slice+head scheme retained every
 	// consumed header in this pattern, growing without bound).
-	q.HandleDatagramFrame(f)
-	q.HandleDatagramFrame(f)
+	q.HandleDatagramFrame(newFrame())
+	q.HandleDatagramFrame(newFrame())
 	for i := 0; i < 20000; i++ {
 		data, err := q.Receive(context.Background())
 		if err != nil {
 			t.Fatalf("Receive: %v", err)
 		}
 		q.ReleaseDatagram(data)
-		q.HandleDatagramFrame(f) // never lets the queue drain empty
+		q.HandleDatagramFrame(newFrame()) // never lets the queue drain empty
 		if q.rcvQueue.Len() != 2 {
 			t.Fatalf("iteration %d: queue len = %d, want 2", i, q.rcvQueue.Len())
 		}

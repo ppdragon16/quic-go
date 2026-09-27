@@ -30,7 +30,11 @@ func TestForcingReceiveBufferSize(t *testing.T) {
 	require.NoError(t, err)
 
 	const small = 256 << 10 // 256 KB
-	require.NoError(t, forceSetReceiveBuffer(syscallConn, small))
+	if err := forceSetReceiveBuffer(syscallConn, small); errors.Is(err, unix.EPERM) {
+		t.Skip("SO_RCVBUFFORCE not permitted (no CAP_NET_ADMIN over the initial user namespace)")
+	} else {
+		require.NoError(t, err)
+	}
 
 	size, err := inspectReadBuffer(syscallConn)
 	require.NoError(t, err)
@@ -57,7 +61,11 @@ func TestForcingSendBufferSize(t *testing.T) {
 	require.NoError(t, err)
 
 	const small = 256 << 10 // 256 KB
-	require.NoError(t, forceSetSendBuffer(syscallConn, small))
+	if err := forceSetSendBuffer(syscallConn, small); errors.Is(err, unix.EPERM) {
+		t.Skip("SO_SNDBUFFORCE not permitted (no CAP_NET_ADMIN over the initial user namespace)")
+	} else {
+		require.NoError(t, err)
+	}
 
 	size, err := inspectWriteBuffer(syscallConn)
 	require.NoError(t, err)
@@ -65,7 +73,11 @@ func TestForcingSendBufferSize(t *testing.T) {
 	require.Equal(t, 2*small, size)
 
 	const large = 32 << 20 // 32 MB
-	require.NoError(t, forceSetSendBuffer(syscallConn, large))
+	if err := forceSetSendBuffer(syscallConn, large); errors.Is(err, unix.EPERM) {
+		t.Skip("SO_SNDBUFFORCE not permitted (no CAP_NET_ADMIN over the initial user namespace)")
+	} else {
+		require.NoError(t, err)
+	}
 	size, err = inspectWriteBuffer(syscallConn)
 	require.NoError(t, err)
 	// the kernel doubles this value (to allow space for bookkeeping overhead)
