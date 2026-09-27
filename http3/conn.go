@@ -309,8 +309,11 @@ func (c *connection) receiveDatagrams() error {
 		c.streamMx.Lock()
 		dg, ok := c.streams[streamID]
 		if !ok {
+			// The stream is not registered (yet): the datagram cannot be
+			// routed, but dropping the receive loop would silently kill
+			// datagram delivery for every other stream on this connection.
 			c.streamMx.Unlock()
-			return nil
+			continue
 		}
 		c.streamMx.Unlock()
 		dg.enqueue(b[n:])
