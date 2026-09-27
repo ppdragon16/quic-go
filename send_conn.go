@@ -2,6 +2,8 @@ package quic
 
 import (
 	"net"
+	"net/netip"
+	"slices"
 	"sync/atomic"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
@@ -24,6 +26,9 @@ type sconn struct {
 
 	localAddr  net.Addr
 	remoteAddr atomic.Value
+	// remoteKey is the netip.AddrPort of remoteAddr, used to skip re-copying
+	// an unchanged peer address. netip.AddrPort{} means "not comparable".
+	remoteKey atomic.Value
 
 	logger utils.Logger
 
@@ -119,9 +124,55 @@ func (c *sconn) capabilities() connCapabilities {
 func (c *sconn) RemoteAddr() net.Addr { return c.remoteAddr.Load().(net.Addr) }
 func (c *sconn) LocalAddr() net.Addr  { return c.localAddr }
 
+// SetRemoteAddr publishes addr as the connection's remote address.
+//
+// The address is copied on the way in: the receive path hands out pooled
+// *net.UDPAddr values whose backing array later packets reuse, while every
+// reader of RemoteAddr() (the send path marshalling the destination sockaddr,
+// the address token generator at handshake completion, http3's request remote
+// address) outlives that packet's buffer release. Reading the pooled value
+// through this field was a data race and could send to a rewritten address.
+//
+// The copy is skipped while the peer address is unchanged, so the steady state
+// (one peer per connection) stays allocation-free.
 func (c *sconn) SetRemoteAddr(addr net.Addr) {
 	if addr == nil {
 		return
 	}
-	c.remoteAddr.Store(addr)
+	key, comparable := addrPortKey(addr)
+	if comparable {
+		if prev, ok := c.remoteKey.Load().(netip.AddrPort); ok && prev == key {
+			return
+		}
+		c.remoteKey.Store(key)
+	} else {
+		c.remoteKey.Store(netip.AddrPort{})
+	}
+	c.remoteAddr.Store(ownedNetAddr(addr))
+}
+
+// addrPortKey extracts a comparable key from a net.Addr. Addresses with a zone
+// (link-local IPv6) are not comparable by this key and always take the copying
+// path.
+func addrPortKey(addr net.Addr) (netip.AddrPort, bool) {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !ok || udpAddr == nil || udpAddr.Zone != "" {
+		return netip.AddrPort{}, false
+	}
+	ip, ok := netip.AddrFromSlice(udpAddr.IP)
+	if !ok || udpAddr.Port < 0 || udpAddr.Port > 65535 {
+		return netip.AddrPort{}, false
+	}
+	return netip.AddrPortFrom(ip.Unmap(), uint16(udpAddr.Port)), true
+}
+
+// ownedNetAddr returns addr with backing storage owned by the caller.
+func ownedNetAddr(addr net.Addr) net.Addr {
+	udpAddr, ok := addr.(*net.UDPAddr)
+	if !ok || udpAddr == nil {
+		return addr
+	}
+	cp := *udpAddr
+	cp.IP = slices.Clone(udpAddr.IP)
+	return &cp
 }
