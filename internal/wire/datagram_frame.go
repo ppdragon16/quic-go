@@ -8,11 +8,15 @@ import (
 	"github.com/daeuniverse/quic-go/quicvarint"
 )
 
-// MaxDatagramSize is the maximum size of a DATAGRAM frame (RFC 9221).
-// By setting it to a large value, we allow all datagrams that fit into a QUIC packet.
-// The value is chosen such that it can still be encoded as a 2 byte varint.
-// This is a var and not a const so it can be set in tests.
-var MaxDatagramSize protocol.ByteCount = 1200
+// MaxDatagramSize is the maximum size of a DATAGRAM frame (RFC 9221) that this
+// endpoint accepts, and is advertised as the max_datagram_frame_size transport
+// parameter. 1400 fits a 1452-byte packet (MaxPacketBufferSize) with the QUIC
+// header, the frame header and the HTTP/3 datagram quarter-stream-id prefix,
+// leaving the payload headroom a masque/CONNECT-UDP tunnel needs to relay the
+// inner connection's post-handshake datagrams (1200 here silently dropped
+// every >1200-byte datagram a peer sent us, which broke h3 over masque
+// tunnels).
+var MaxDatagramSize protocol.ByteCount = 1424
 
 // A DatagramFrame is a DATAGRAM frame
 type DatagramFrame struct {
