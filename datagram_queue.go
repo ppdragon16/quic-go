@@ -26,9 +26,14 @@ const (
 	initDatagramRcvQueueLen = 128
 	maxDatagramRcvQueueLen  = 512
 	// maxDatagramBufPoolLen bounds how many receive buffers are retained for
-	// reuse. 256 x 1452B = ~372KB worst-case steady-state retention, which
-	// caps the pool's footprint while still absorbing line-rate bursts.
-	maxDatagramBufPoolLen = 256
+	// reuse. It must cover the worst-case in-flight depth, not just this
+	// queue: the MASQUE consumer adds another maxUDPFlows*4 (=512) slots of
+	// readCh on top of maxDatagramRcvQueueLen, so a burst can hold >1024
+	// buffers. With a 256-slot pool every datagram beyond 256 in flight
+	// allocated on Get and was dropped on Put — a permanent per-datagram
+	// allocation treadmill (117MB cumulative in a MASQUE-relay heap profile).
+	// 1024 x 1452B = ~1.5MB worst-case retention.
+	maxDatagramBufPoolLen = 1024
 )
 
 // datagramSendQueueFullTimeout bounds how long Add waits on a full send queue
