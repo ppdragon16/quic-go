@@ -284,6 +284,15 @@ func (s *stream) SendDatagram(b []byte) error {
 	return s.datagrams.Send(b)
 }
 
+// ReleaseDatagram returns a datagram buffer handed out by ReceiveDatagram to
+// the connection's receive pool. Callers that are done with the payload (for
+// example after copying it out) must release it exactly once; a buffer that is
+// never released is still garbage-collected, but forfeits the pool's
+// allocation savings on the datagram path.
+func (s *stream) ReleaseDatagram(data []byte) {
+	s.conn.ReleaseDatagram(data)
+}
+
 func (s *stream) ReceiveDatagram(ctx context.Context) ([]byte, error) {
 	// TODO: reject if datagrams are not negotiated (yet)
 	return s.datagrams.Receive(ctx)
