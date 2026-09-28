@@ -2008,8 +2008,6 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 
 	ecn := s.sentPacketHandler.ECNMode(true)
 	var segSize protocol.ByteCount
-	var lastSize protocol.ByteCount
-	var stopMerging bool
 	for {
 		// Each GSO batch gets its own buffer: sendQueue.Send hands the
 		// buffer to the send goroutine (async write + Release), so the
@@ -2018,8 +2016,17 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 		// corrupting packets and poisoning the buffer pool.
 		buf := getLargePacketBuffer()
 		for {
+			// GSO requires every segment but the last to be exactly segSize,
+			// and the last to be *at most* segSize. Cap the packet size at the
+			// batch's segment size so no packet appended here can ever exceed
+			// it: a larger tail would make the kernel split that packet at
+			// segSize boundaries, emitting truncated garbage segments.
+			packSize := maxSize
+			if segSize > 0 && segSize < packSize {
+				packSize = segSize
+			}
 			var dontSendMore bool
-			size, err := s.appendOneShortHeaderPacket(buf, maxSize, ecn, now)
+			size, err := s.appendOneShortHeaderPacket(buf, packSize, ecn, now)
 			if err != nil {
 				if err != errNothingToPack {
 					buf.Release()
@@ -2030,16 +2037,9 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 					return nil
 				}
 				dontSendMore = true
-			} else {
-				if segSize == 0 {
-					segSize = size
-				} else if stopMerging || size != lastSize {
-					// First packet of a different size: it stays in the
-					// buffer as the batch's last segment, and no further
-					// packets are merged into this batch.
-					stopMerging = true
-				}
-				lastSize = size
+			} else if segSize == 0 {
+				// The first packet of the batch determines the segment size.
+				segSize = size
 			}
 
 			if !dontSendMore {
@@ -2057,12 +2057,14 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 
 			// Append another packet if
 			// 1. The congestion controller and pacer allow sending more
-			// 2. The last packet appended has the same size as the batch's
-			//    segment size (GSO requires uniform segments; this extends the
-			//    upstream full-size-only condition to DATAGRAM traffic)
+			// 2. The last packet appended is a full segment (segSize); a
+			//    shorter packet is the batch's final segment, so it must not
+			//    be followed by anything. This extends the upstream
+			//    full-maxSize-only condition to uniformly smaller DATAGRAM
+			//    packets.
 			// 3. The next packet will have the same ECN marking
-			// 4. We still have enough space for another packet in the buffer
-			if !dontSendMore && !stopMerging && segSize > 0 && size == segSize && nextECN == ecn && buf.Len()+segSize <= buf.Cap() {
+			// 4. We still have enough space for another segment in the buffer
+			if !dontSendMore && segSize > 0 && size == segSize && nextECN == ecn && buf.Len()+segSize <= buf.Cap() {
 				continue
 			}
 
@@ -2070,8 +2072,6 @@ func (s *connection) sendPacketsWithGSO(now time.Time) error {
 			// Reset the batch state: the next batch starts fresh and its
 			// first packet determines the new segment size.
 			segSize = 0
-			lastSize = 0
-			stopMerging = false
 			ecn = nextECN
 
 			if dontSendMore {

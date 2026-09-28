@@ -2065,6 +2065,84 @@ func TestConnectionGSOBatchPacketSize(t *testing.T) {
 	}
 }
 
+// Regression test for the GSO batch segment-size invariant.
+//
+// The kernel splits a GSO buffer at gsoSize boundaries, so every packet in a
+// batch except the last must be exactly gsoSize, and the last must be at most
+// gsoSize. The batch's segment size is fixed by its first packet. Previously
+// the send loop kept packing subsequent packets at maxPacketSize, so when the
+// first packet was small (a partially filled packet) and a later one was
+// full-size, the kernel split the full-size packet at the small segment size,
+// emitting truncated garbage segments on the wire. The peer dropped them, the
+// sender saw a steady trickle of reordering-threshold losses, and the
+// congestion window collapsed to ~10 packets per RTT (~0.3 MB/s on a 60 ms RTT
+// path, for every congestion controller).
+func TestConnectionGSOBatchSegmentSizeInvariant(t *testing.T) {
+	mockCtrl := gomock.NewController(t)
+	sph := mockackhandler.NewMockSentPacketHandler(mockCtrl)
+	tc := newServerTestConnection(t,
+		mockCtrl,
+		nil,
+		true,
+		connectionOptHandshakeConfirmed(),
+		connectionOptSentPacketHandler(sph),
+	)
+
+	sph.EXPECT().SendMode(gomock.Any()).Return(ackhandler.SendAny).AnyTimes()
+	sph.EXPECT().TimeUntilSend().Return(time.Time{}).AnyTimes()
+	sph.EXPECT().SentPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	sph.EXPECT().GetLossDetectionTimeout().Return(time.Time{}).AnyTimes()
+	sph.EXPECT().ECNMode(gomock.Any()).Return(protocol.ECT1).AnyTimes()
+
+	const firstPacketSize = 100
+	maxPacketSize := tc.conn.maxPacketSize()
+
+	// The first packet only fills part of a maximum-size packet. It fixes the
+	// batch's segment size at 100 bytes.
+	tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(buffer *packetBuffer, count protocol.ByteCount, now time.Time, version protocol.Version) (shortHeaderPacket, error) {
+			require.Equal(t, maxPacketSize, count)
+			buffer.Data = append(buffer.Data, bytes.Repeat([]byte{1}, firstPacketSize)...)
+			return shortHeaderPacket{PacketNumber: 10}, nil
+		},
+	)
+	// The second packet must not be allowed to exceed the batch's segment
+	// size, no matter how much data is available.
+	tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(buffer *packetBuffer, count protocol.ByteCount, now time.Time, version protocol.Version) (shortHeaderPacket, error) {
+			require.LessOrEqual(t, count, protocol.ByteCount(firstPacketSize),
+				"a packet appended after the batch's first packet was allowed to grow beyond the batch's segment size; the kernel will split it into truncated segments")
+			buffer.Data = append(buffer.Data, bytes.Repeat([]byte{2}, int(count))...)
+			return shortHeaderPacket{PacketNumber: 11}, nil
+		},
+	)
+	tc.packer.EXPECT().AppendPacket(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(shortHeaderPacket{}, errNothingToPack)
+
+	expectedData := append(bytes.Repeat([]byte{1}, firstPacketSize), bytes.Repeat([]byte{2}, firstPacketSize)...)
+	done := make(chan struct{})
+	tc.sendConn.EXPECT().Write(expectedData, uint16(firstPacketSize), protocol.ECT1).DoAndReturn(
+		func([]byte, uint16, protocol.ECN) error { close(done); return nil },
+	)
+	errChan := make(chan error, 1)
+	go func() { errChan <- tc.conn.run() }()
+	tc.conn.scheduleSending()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timeout")
+	}
+
+	// test teardown
+	tc.connRunner.EXPECT().Remove(gomock.Any()).AnyTimes()
+	tc.conn.destroy(nil)
+	select {
+	case err := <-errChan:
+		require.NoError(t, err)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 func TestConnectionGSOBatchECN(t *testing.T) {
 	mockCtrl := gomock.NewController(t)
 	sph := mockackhandler.NewMockSentPacketHandler(mockCtrl)
