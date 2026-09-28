@@ -14,11 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-
-
-
-
-
 func TestFrameSorterSimpleCases(t *testing.T) {
 	s := newFrameSorter()
 	_, data, frame := s.Pop()

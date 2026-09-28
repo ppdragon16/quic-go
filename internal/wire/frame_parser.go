@@ -63,7 +63,7 @@ type FrameParser struct {
 	// datagramFrame: removed pre-allocated field — parseDatagramFrame now
 	// returns a pooled frame (GetDatagramFrame) instead of filling a
 	// parser-owned struct. Data buffers are managed via GetBuffer/PutBuffer.
-	connectionCloseFrame    ConnectionCloseFrame
+	connectionCloseFrame ConnectionCloseFrame
 }
 
 // NewFrameParser creates a new frame parser.
@@ -137,7 +137,7 @@ func (p *FrameParser) parseFrame(b []byte, typ uint64, encLevel protocol.Encrypt
 			frame = &p.stopSendingFrame
 		case cryptoFrameType:
 			l, err = parseCryptoFrame(&p.cryptoFrame, b, v)
-				frame = &p.cryptoFrame
+			frame = &p.cryptoFrame
 		case newTokenFrameType:
 			frame, l, err = parseNewTokenFrame(b, v)
 		case maxDataFrameType:
@@ -171,7 +171,7 @@ func (p *FrameParser) parseFrame(b []byte, typ uint64, encLevel protocol.Encrypt
 			frame = &p.pathResponseFrame
 		case connectionCloseFrameType, applicationCloseFrameType:
 			l, err = parseConnectionCloseFrame(&p.connectionCloseFrame, b, typ, v)
-				frame = &p.connectionCloseFrame
+			frame = &p.connectionCloseFrame
 		case handshakeDoneFrameType:
 			frame = &p.handshakeDoneFrame
 		case 0x30, 0x31:

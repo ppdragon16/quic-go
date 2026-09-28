@@ -110,8 +110,8 @@ func TestFrameSorter2GapHandling(t *testing.T) {
 	// ---xxx---+++++++--------
 	t.Run("gap between", func(t *testing.T) {
 		s := newFrameSorter2()
-		f1 := getData(ds)   // 0..ds
-		f2 := getData(ds)   // 3*ds..4*ds
+		f1 := getData(ds)      // 0..ds
+		f2 := getData(ds)      // 3*ds..4*ds
 		gapFill := getData(ds) // ds..2*ds
 		require.NoError(t, s.Push(f1, 0, &wire.StreamFrame{}))
 		require.NoError(t, s.Push(f2, 3*ds, &wire.StreamFrame{}))
@@ -172,7 +172,7 @@ func TestFrameSorter2GapHandling(t *testing.T) {
 		require.Nil(t, data)
 
 		// Fill 800..1000 gap
-		gapFill := getData(ds) // 200 bytes
+		gapFill := getData(ds)                         // 200 bytes
 		require.NoError(t, s.Push(gapFill, 4*ds, nil)) // at 800
 		offset, data, _ = s.Pop()
 		require.Equal(t, protocol.ByteCount(4*ds), offset)
@@ -455,8 +455,8 @@ func TestFrameSorter2ReadPosGaps(t *testing.T) {
 	// Push two frames with a gap. Offsets: 0, 3*ds (gap from ds to 3*ds)
 	a := dataGen("hello", int(ds))
 	b := dataGen("world", int(ds))
-	require.NoError(t, s.Push(a, 0, &wire.StreamFrame{}))      // 0..ds
-	require.NoError(t, s.Push(b, 3*ds, &wire.StreamFrame{}))  // 3ds..4ds
+	require.NoError(t, s.Push(a, 0, &wire.StreamFrame{}))    // 0..ds
+	require.NoError(t, s.Push(b, 3*ds, &wire.StreamFrame{})) // 3ds..4ds
 
 	// Consume the first frame → readPos becomes ds
 	offset, data, _ := s.Pop()
@@ -568,6 +568,7 @@ func TestFrameSorter2PushOverlap(t *testing.T) {
 //   - splitting a chunk when it becomes full (17th entry → split at 8)
 //   - merging adjacent chunks structurally (tryMergeWithNext consolidates sparse chunks)
 //   - combined: gap-fill leaves sparse chunks which tryMergeWithNext consolidates
+//
 // Frame merging is not tested — it was removed from frame_sorter2.
 func TestFrameSorter2ChunkOperations(t *testing.T) {
 	// ── 1. No frame merge: small contiguous frames stay separate ────
@@ -721,7 +722,7 @@ func TestFrameSorter2GapCount(t *testing.T) {
 	t.Run("insert away from readPos splits gap", func(t *testing.T) {
 		s := newFrameSorter2()
 		require.NoError(t, s.Push(dataGen("a", ds), ds, nil)) // [ds, 2ds)
-		require.Equal(t, 2, s.gapCount) // [0, ds) + [2ds, Max)
+		require.Equal(t, 2, s.gapCount)                       // [0, ds) + [2ds, Max)
 	})
 
 	t.Run("contiguous at readPos fills leading gap", func(t *testing.T) {
@@ -729,14 +730,14 @@ func TestFrameSorter2GapCount(t *testing.T) {
 		require.NoError(t, s.Push(dataGen("a", ds), ds, nil)) // [ds, 2ds)
 		require.Equal(t, 2, s.gapCount)
 		require.NoError(t, s.Push(dataGen("b", ds), 0, nil)) // [0, ds), contiguous with readPos
-		require.Equal(t, 1, s.gapCount) // only [2ds, Max) remains
+		require.Equal(t, 1, s.gapCount)                      // only [2ds, Max) remains
 	})
 
 	t.Run("three entries two internal gaps", func(t *testing.T) {
 		s := newFrameSorter2()
 		require.NoError(t, s.Push(dataGen("a", ds), ds, nil))   // [ds, 2ds)
 		require.NoError(t, s.Push(dataGen("b", ds), 3*ds, nil)) // [3ds, 4ds)
-		require.Equal(t, 3, s.gapCount) // [0,ds), [2ds,3ds), [4ds,Max)
+		require.Equal(t, 3, s.gapCount)                         // [0,ds), [2ds,3ds), [4ds,Max)
 	})
 
 	t.Run("fill internal gap exactly", func(t *testing.T) {
@@ -745,14 +746,14 @@ func TestFrameSorter2GapCount(t *testing.T) {
 		require.NoError(t, s.Push(dataGen("b", ds), 3*ds, nil)) // [3ds, 4ds)
 		require.Equal(t, 3, s.gapCount)
 		require.NoError(t, s.Push(dataGen("c", ds), 2*ds, nil)) // [2ds, 3ds), fills the gap
-		require.Equal(t, 2, s.gapCount) // [0,ds), [4ds,Max)
+		require.Equal(t, 2, s.gapCount)                         // [0,ds), [4ds,Max)
 	})
 
 	t.Run("fill gap partially contiguous at one side", func(t *testing.T) {
 		s := newFrameSorter2()
 		require.NoError(t, s.Push(dataGen("a", ds), 0, nil))    // [0, ds)
 		require.NoError(t, s.Push(dataGen("b", ds), 2*ds, nil)) // [2ds, 3ds)
-		require.Equal(t, 2, s.gapCount) // [ds, 2ds), [3ds, Max)
+		require.Equal(t, 2, s.gapCount)                         // [ds, 2ds), [3ds, Max)
 		// Fill contiguous after first entry, leaving gap before second
 		require.NoError(t, s.Push(dataGen("c", ds/2), ds, nil)) // [ds, ds+ds/2)
 		// Gaps: [ds+ds/2, 2ds), [3ds, Max) → count unchanged
@@ -761,20 +762,20 @@ func TestFrameSorter2GapCount(t *testing.T) {
 
 	t.Run("longer frame replaces shorter at same offset", func(t *testing.T) {
 		s := newFrameSorter2()
-		require.NoError(t, s.Push(dataGen("a", ds), ds, nil))    // [ds, 2ds)
+		require.NoError(t, s.Push(dataGen("a", ds), ds, nil)) // [ds, 2ds)
 		require.Equal(t, 2, s.gapCount)
 		require.NoError(t, s.Push(dataGen("b", ds+50), ds, nil)) // [ds, 2ds+50)
-		require.Equal(t, 2, s.gapCount) // same gap structure, entry just grew
+		require.Equal(t, 2, s.gapCount)                          // same gap structure, entry just grew
 	})
 
 	t.Run("longer frame replaces with adjacent gap closed", func(t *testing.T) {
 		s := newFrameSorter2()
 		require.NoError(t, s.Push(dataGen("a", ds), ds, nil))   // [ds, 2ds)
 		require.NoError(t, s.Push(dataGen("b", ds), 3*ds, nil)) // [3ds, 4ds)
-		require.Equal(t, 3, s.gapCount) // [0,ds), [2ds,3ds), [4ds,Max)
+		require.Equal(t, 3, s.gapCount)                         // [0,ds), [2ds,3ds), [4ds,Max)
 		// Replace [ds, 2ds) with [ds, 3ds) — extends to touch [3ds, 4ds)
 		require.NoError(t, s.Push(dataGen("c", 2*ds), ds, nil)) // [ds, 3ds)
-		require.Equal(t, 2, s.gapCount) // [0,ds), [4ds,Max)
+		require.Equal(t, 2, s.gapCount)                         // [0,ds), [4ds,Max)
 	})
 
 	t.Run("overlap fully covers and deletes entry", func(t *testing.T) {
@@ -789,9 +790,9 @@ func TestFrameSorter2GapCount(t *testing.T) {
 
 	t.Run("overlap trims start inside entry fills gap", func(t *testing.T) {
 		s := newFrameSorter2()
-		require.NoError(t, s.Push(dataGen("a", ds), 0, nil))     // [0, ds)
-		require.NoError(t, s.Push(dataGen("b", ds), 3*ds, nil))  // [3ds, 4ds)
-		require.Equal(t, 2, s.gapCount) // [ds, 3ds), [4ds, Max)
+		require.NoError(t, s.Push(dataGen("a", ds), 0, nil))    // [0, ds)
+		require.NoError(t, s.Push(dataGen("b", ds), 3*ds, nil)) // [3ds, 4ds)
+		require.Equal(t, 2, s.gapCount)                         // [ds, 3ds), [4ds, Max)
 		// Push 500 bytes at offset 100; after trimming start from 100→200,
 		// 400 bytes remain covering [ds, 3ds)=[200,600) exactly.
 		require.NoError(t, s.Push(dataGen("c", int(2*ds+ds/2)), ds/2, nil))
@@ -813,21 +814,21 @@ func TestFrameSorter2GapCount(t *testing.T) {
 		s := newFrameSorter2()
 		require.NoError(t, s.Push(dataGen("a", ds), ds, nil)) // [ds, 2ds)
 		require.NoError(t, s.Push(dataGen("b", ds), 0, nil))  // [0, ds)
-		require.Equal(t, 1, s.gapCount) // [2ds, Max)
-		s.Pop() // consume [0, ds)
+		require.Equal(t, 1, s.gapCount)                       // [2ds, Max)
+		s.Pop()                                               // consume [0, ds)
 		require.Equal(t, 1, s.gapCount)
-		s.Pop() // consume [ds, 2ds)
+		s.Pop()                         // consume [ds, 2ds)
 		require.Equal(t, 1, s.gapCount) // trailing gap always present
 		require.False(t, s.HasMoreData())
 	})
 
 	t.Run("pop then push new data correct gapCount", func(t *testing.T) {
 		s := newFrameSorter2()
-		require.NoError(t, s.Push(dataGen("a", ds), 0, nil))   // [0, ds)
+		require.NoError(t, s.Push(dataGen("a", ds), 0, nil))    // [0, ds)
 		require.NoError(t, s.Push(dataGen("b", ds), 2*ds, nil)) // [2ds, 3ds)
-		require.Equal(t, 2, s.gapCount) // [ds, 2ds), [3ds, Max)
-		s.Pop() // readPos = ds
-		require.Equal(t, 2, s.gapCount) // gaps unchanged, now relative to ds
+		require.Equal(t, 2, s.gapCount)                         // [ds, 2ds), [3ds, Max)
+		s.Pop()                                                 // readPos = ds
+		require.Equal(t, 2, s.gapCount)                         // gaps unchanged, now relative to ds
 		// Push data starting at ds (the new readPos) — fills leading gap partially
 		require.NoError(t, s.Push(dataGen("c", ds/2), ds, nil)) // [ds, ds+ds/2)
 		// Still gap [ds+ds/2, 2ds) → count stays 2
@@ -861,19 +862,19 @@ func TestFrameSorter2GapCount(t *testing.T) {
 
 	t.Run("insert contiguous after existing entry no gap change", func(t *testing.T) {
 		s := newFrameSorter2()
-		require.NoError(t, s.Push(dataGen("a", ds), 0, nil))    // [0, ds)
-		require.Equal(t, 1, s.gapCount) // [ds, Max)
-		require.NoError(t, s.Push(dataGen("b", ds), ds, nil))   // [ds, 2ds), contiguous
-		require.Equal(t, 1, s.gapCount) // [2ds, Max), gap shifted but count unchanged
+		require.NoError(t, s.Push(dataGen("a", ds), 0, nil))  // [0, ds)
+		require.Equal(t, 1, s.gapCount)                       // [ds, Max)
+		require.NoError(t, s.Push(dataGen("b", ds), ds, nil)) // [ds, 2ds), contiguous
+		require.Equal(t, 1, s.gapCount)                       // [2ds, Max), gap shifted but count unchanged
 	})
 
 	t.Run("insert between two entries not touching either", func(t *testing.T) {
 		s := newFrameSorter2()
-		require.NoError(t, s.Push(dataGen("a", ds), ds, nil))     // [ds, 2ds)
-		require.NoError(t, s.Push(dataGen("b", ds), 4*ds, nil))   // [4ds, 5ds)
-		require.Equal(t, 3, s.gapCount) // [0,ds), [2ds,4ds), [5ds,Max)
+		require.NoError(t, s.Push(dataGen("a", ds), ds, nil))   // [ds, 2ds)
+		require.NoError(t, s.Push(dataGen("b", ds), 4*ds, nil)) // [4ds, 5ds)
+		require.Equal(t, 3, s.gapCount)                         // [0,ds), [2ds,4ds), [5ds,Max)
 		// Insert in the middle of the big gap, touching neither entry
-		require.NoError(t, s.Push(dataGen("c", ds), 3*ds, nil))   // [3ds, 4ds)
+		require.NoError(t, s.Push(dataGen("c", ds), 3*ds, nil)) // [3ds, 4ds)
 		// Splits [2ds,4ds) → [2ds,3ds) + entry touches [4ds,5ds) so no right gap.
 		require.Equal(t, 3, s.gapCount) // [0,ds), [2ds,3ds), [5ds,Max)
 	})
@@ -884,7 +885,7 @@ func TestFrameSorter2GapCount(t *testing.T) {
 		s := newFrameSorter2()
 		require.NoError(t, s.Push([]byte("bbbb"), 4, nil)) // [4, 8)
 		require.NoError(t, s.Push([]byte("aaaa"), 0, nil)) // [0, 4), contiguous
-		require.Equal(t, 1, s.gapCount) // [8, Max)
+		require.Equal(t, 1, s.gapCount)                    // [8, Max)
 		offset, d, _ := s.Pop()
 		require.Equal(t, protocol.ByteCount(0), offset)
 		require.Equal(t, []byte("aaaa"), d)
@@ -898,7 +899,7 @@ func TestFrameSorter2GapCount(t *testing.T) {
 		s := newFrameSorter2()
 		require.NoError(t, s.Push([]byte("aaaa"), 0, nil)) // [0, 4)
 		require.NoError(t, s.Push([]byte("bbbb"), 4, nil)) // contiguous
-		require.Equal(t, 1, s.gapCount) // [8, Max)
+		require.Equal(t, 1, s.gapCount)                    // [8, Max)
 		offset, d, _ := s.Pop()
 		require.Equal(t, protocol.ByteCount(0), offset)
 		require.Equal(t, []byte("aaaa"), d)

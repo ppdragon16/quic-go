@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/francoispqt/gojay"
 	"github.com/daeuniverse/quic-go/internal/protocol"
 	"github.com/daeuniverse/quic-go/internal/wire"
 	"github.com/daeuniverse/quic-go/logging"
+	"github.com/francoispqt/gojay"
 	"github.com/stretchr/testify/require"
 )
 
