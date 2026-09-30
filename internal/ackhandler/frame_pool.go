@@ -78,3 +78,45 @@ func GetStreamFrames() []StreamFrame { return streamFramesPool.get()[:0] }
 
 // PutStreamFrames returns streamFrames to the pool. It must not be used afterwards.
 func PutStreamFrames(streamFrames []StreamFrame) { streamFramesPool.put(streamFrames[:0]) }
+
+// objectPool is a bounded, GC-surviving LIFO pool of single objects, the
+// single-object analogue of slicePool. It exists for the same reasons:
+// sync.Pool is emptied at every GC, and under bursty Put traffic its internal
+// chain allocates a new block (sync.(*poolChain).pushHead showed ~5MB
+// attributed to putPacket alone in a relay heap profile). This pool survives
+// the GC, is typed (no interface boxing) and is bounded so a burst cannot pin
+// unbounded memory.
+type objectPool[T any] struct {
+	mu    sync.Mutex
+	buf   []*T
+	newFn func() *T
+}
+
+// objectPoolMax caps how many objects one pool retains.
+const objectPoolMax = 4096
+
+func newObjectPool[T any](newFn func() *T) *objectPool[T] {
+	return &objectPool[T]{newFn: newFn}
+}
+
+func (p *objectPool[T]) get() *T {
+	p.mu.Lock()
+	n := len(p.buf)
+	if n == 0 {
+		p.mu.Unlock()
+		return p.newFn()
+	}
+	o := p.buf[n-1]
+	p.buf[n-1] = nil // do not keep a ghost reference in the backing array
+	p.buf = p.buf[:n-1]
+	p.mu.Unlock()
+	return o
+}
+
+func (p *objectPool[T]) put(o *T) {
+	p.mu.Lock()
+	if len(p.buf) < objectPoolMax {
+		p.buf = append(p.buf, o)
+	}
+	p.mu.Unlock()
+}

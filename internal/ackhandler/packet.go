@@ -1,7 +1,6 @@
 package ackhandler
 
 import (
-	"sync"
 	"time"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
@@ -33,10 +32,10 @@ func (p *packet) outstanding() bool {
 	return !p.declaredLost && !p.skippedPacket && !p.IsPathMTUProbePacket
 }
 
-var packetPool = sync.Pool{New: func() any { return &packet{} }}
+var packetPool = newObjectPool(func() *packet { return &packet{} })
 
 func getPacket() *packet {
-	p := packetPool.Get().(*packet)
+	p := packetPool.get()
 	*p = packet{}
 	return p
 }
@@ -46,5 +45,5 @@ func putPacket(p *packet) {
 	PutStreamFrames(p.StreamFrames)
 	p.Frames = nil
 	p.StreamFrames = nil
-	packetPool.Put(p)
+	packetPool.put(p)
 }
