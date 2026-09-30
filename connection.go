@@ -1752,6 +1752,20 @@ func (s *connection) dropEncryptionLevel(encLevel protocol.EncryptionLevel, now 
 	}
 	s.sentPacketHandler.DropPackets(encLevel, now)
 	s.receivedPacketHandler.DropPackets(encLevel)
+	// Purge the retransmission queue for the dropped packet number space. Its
+	// CRYPTO frames alias the crypto stream's write buffer and can never be
+	// sent again once the keys are gone — the packer only drains them while
+	// packing packets of that encryption level. Leaving them in place pinned
+	// the ClientHello/ServerHello buffer (plus the frame structs) for the
+	// entire connection lifetime. Both levels' data is already accounted for
+	// by the time the keys are dropped: Initial keys go away only after the
+	// peer proved it received its flight (a Handshake packet arrived / was
+	// sent), and Handshake keys go away at handshake confirmation.
+	//nolint:exhaustive // Only Initial and Handshake carry CRYPTO data.
+	switch encLevel {
+	case protocol.EncryptionInitial, protocol.EncryptionHandshake:
+		s.retransmissionQueue.DropPackets(encLevel)
+	}
 	//nolint:exhaustive // only Initial and 0-RTT need special treatment
 	switch encLevel {
 	case protocol.EncryptionInitial:
