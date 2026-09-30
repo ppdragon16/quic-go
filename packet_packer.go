@@ -18,6 +18,12 @@ import (
 
 var errNothingToPack = errors.New("nothing to pack")
 
+// sharedPingFrame is the single, shared PING frame instance. wire.PingFrame is
+// a zero-field struct that is only ever type-switched, never mutated, so one
+// instance serves every ping and saves a heap allocation per ACK-eliciting
+// ping packet.
+var sharedPingFrame = &wire.PingFrame{}
+
 type packer interface {
 	PackCoalescedPacket(onlyAck bool, maxPacketSize protocol.ByteCount, now time.Time, v protocol.Version) (*coalescedPacket, error)
 	PackAckOnlyPacket(maxPacketSize protocol.ByteCount, now time.Time, v protocol.Version) (shortHeaderPacket, *packetBuffer, error)
@@ -651,9 +657,18 @@ func (p *packetPacker) maybeGetAppDataPacket(
 		}
 		// the packet only contains an ACK
 		if p.numNonAckElicitingAcks >= protocol.MaxNonAckElicitingAcks {
-			ping := &wire.PingFrame{}
-			pl.frames = append(pl.frames, ackhandler.Frame{Frame: ping})
-			pl.length += ping.Length(v)
+			// pl.frames is nil on this path (composeNextPacket returned before
+			// taking a slice from the pool), so appending would allocate a
+			// fresh cap-1 slice that then pollutes framesPool on release —
+			// undersized entries make every later GetFrames append reallocate.
+			// Take a properly sized slice from the pool instead, like the other
+			// frame paths. PingFrame is stateless (zero fields, never mutated),
+			// so one shared instance serves every ping.
+			if pl.frames == nil {
+				pl.frames = ackhandler.GetFrames()
+			}
+			pl.frames = append(pl.frames, ackhandler.Frame{Frame: sharedPingFrame})
+			pl.length += sharedPingFrame.Length(v)
 			p.numNonAckElicitingAcks = 0
 		} else {
 			p.numNonAckElicitingAcks++
