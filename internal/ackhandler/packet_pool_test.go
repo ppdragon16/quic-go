@@ -3,6 +3,8 @@ package ackhandler
 import (
 	"runtime"
 	"testing"
+
+	"github.com/daeuniverse/quic-go/internal/utils"
 )
 
 // The packet pool must survive a GC: sync.Pool was emptied at every cycle,
@@ -46,16 +48,17 @@ func TestPutPacketReturnsFrameSlices(t *testing.T) {
 	PutFrames(frames)
 }
 
-// The packet pool must stay bounded.
-func TestObjectPoolIsBounded(t *testing.T) {
-	p := newObjectPool(func() *packet { return &packet{} })
-	for i := 0; i < objectPoolMax*2; i++ {
-		p.put(&packet{})
+// The packet pool must stay bounded (the generic bound behaviour is covered
+// in internal/utils; this pins the packet pool's own wiring).
+func TestPacketPoolIsBounded(t *testing.T) {
+	p := utils.NewPool(func() *packet { return &packet{} }, packetPoolMax)
+	for i := 0; i < packetPoolMax*2; i++ {
+		p.Put(&packet{})
 	}
-	if got := len(p.buf); got != objectPoolMax {
-		t.Fatalf("pool retained %d packets, want the bound %d", got, objectPoolMax)
+	if got := p.Len(); got != packetPoolMax {
+		t.Fatalf("pool retained %d packets, want the bound %d", got, packetPoolMax)
 	}
-	if p.get() == nil {
-		t.Fatal("get returned nil after over-put")
+	if p.Get() == nil {
+		t.Fatal("Get returned nil after over-Put")
 	}
 }

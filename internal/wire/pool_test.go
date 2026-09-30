@@ -37,19 +37,3 @@ func TestFramePoolSurvivesGC(t *testing.T) {
 		t.Fatalf("frame pool did not survive GC: got %p, want the recycled %p", got, f)
 	}
 }
-
-// The pool must stay bounded: a burst of puts may not grow retention past
-// framePoolMax.
-func TestFramePoolIsBounded(t *testing.T) {
-	p := &framePool[StreamFrame]{newFn: func() *StreamFrame { return &StreamFrame{} }}
-	for i := 0; i < framePoolMax*2; i++ {
-		p.put(&StreamFrame{})
-	}
-	if got := len(p.buf); got != framePoolMax {
-		t.Fatalf("pool retained %d frames, want the bound %d", got, framePoolMax)
-	}
-	// Over-put frames are dropped, but gets still hand out usable frames.
-	if f := p.get(); f == nil {
-		t.Fatal("get returned nil after over-put")
-	}
-}

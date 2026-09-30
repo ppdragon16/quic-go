@@ -1,122 +1,29 @@
 package ackhandler
 
-import "sync"
-
-// slicePool is a bounded, GC-surviving LIFO pool of slices. It is typed (unlike
-// sync.Pool), so Get and Put do not box the slice into an interface and thus
-// allocate nothing per operation. The backing store grows lazily by doubling
-// from a small initial capacity up to max, so an idle process does not commit
-// the full metadata up front. Excess slices beyond max are dropped and left
-// for the GC.
-type slicePool[T any] struct {
-	newFn func() T
-	min   int
-	max   int
-
-	mu  sync.Mutex
-	buf []T // len = retained count; cap = current capacity (grows toward max)
-}
-
-func newSlicePool[T any](newFn func() T, min, max int) *slicePool[T] {
-	return &slicePool[T]{newFn: newFn, min: min, max: max}
-}
-
-func (p *slicePool[T]) get() T {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if n := len(p.buf); n > 0 {
-		v := p.buf[n-1]
-		// Clear the popped slot so the backing array does not keep a ghost
-		// reference to v while the caller owns it.
-		var zero T
-		p.buf[n-1] = zero
-		p.buf = p.buf[:n-1]
-		return v
-	}
-	return p.newFn()
-}
-
-func (p *slicePool[T]) put(v T) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if len(p.buf) == cap(p.buf) {
-		// Full. Grow by doubling (up to max), otherwise drop v.
-		if cap(p.buf) >= p.max {
-			return
-		}
-		buf := make([]T, len(p.buf), min(max(cap(p.buf)*2, p.min), p.max))
-		copy(buf, p.buf)
-		p.buf = buf
-	}
-	p.buf = append(p.buf, v)
-}
-
-const (
-	// frameSlicePoolMin is the starting capacity of a slicePool's
-	// backing store.
-	frameSlicePoolMin = 32
-
-	// frameSlicePoolMax caps how many slices each frame pool retains. This is a
-	// per-process bound shared by all connections, reached only under load and
-	// grown lazily.
-	frameSlicePoolMax = 4096
+import (
+	"github.com/daeuniverse/quic-go/internal/utils"
 )
 
+// The frame slice pools. GetFrames/GetStreamFrames hand out pooled slices so
+// packing a packet does not allocate per controlled frame, and the pools are
+// GC-surviving and bounded (see utils.Pool).
 var (
-	framesPool       = newSlicePool(func() []Frame { return make([]Frame, 0, 8) }, frameSlicePoolMin, frameSlicePoolMax)
-	streamFramesPool = newSlicePool(func() []StreamFrame { return make([]StreamFrame, 0, 8) }, frameSlicePoolMin, frameSlicePoolMax)
+	framesPool       = utils.NewPool(func() []Frame { return make([]Frame, 0, 8) }, frameSlicePoolMax)
+	streamFramesPool = utils.NewPool(func() []StreamFrame { return make([]StreamFrame, 0, 8) }, frameSlicePoolMax)
 )
+
+// frameSlicePoolMax caps how many slices each frame pool retains. This is a
+// per-process bound shared by all connections, reached only under load.
+const frameSlicePoolMax = 4096
 
 // GetFrames returns a zero-length slice with capacity for a few control frames.
-func GetFrames() []Frame { return framesPool.get()[:0] }
+func GetFrames() []Frame { return framesPool.Get()[:0] }
 
 // PutFrames returns frames to the pool. It must not be used afterwards.
-func PutFrames(frames []Frame) { framesPool.put(frames[:0]) }
+func PutFrames(frames []Frame) { framesPool.Put(frames[:0]) }
 
 // GetStreamFrames returns a zero-length slice with capacity for a few stream frames.
-func GetStreamFrames() []StreamFrame { return streamFramesPool.get()[:0] }
+func GetStreamFrames() []StreamFrame { return streamFramesPool.Get()[:0] }
 
 // PutStreamFrames returns streamFrames to the pool. It must not be used afterwards.
-func PutStreamFrames(streamFrames []StreamFrame) { streamFramesPool.put(streamFrames[:0]) }
-
-// objectPool is a bounded, GC-surviving LIFO pool of single objects, the
-// single-object analogue of slicePool. It exists for the same reasons:
-// sync.Pool is emptied at every GC, and under bursty Put traffic its internal
-// chain allocates a new block (sync.(*poolChain).pushHead showed ~5MB
-// attributed to putPacket alone in a relay heap profile). This pool survives
-// the GC, is typed (no interface boxing) and is bounded so a burst cannot pin
-// unbounded memory.
-type objectPool[T any] struct {
-	mu    sync.Mutex
-	buf   []*T
-	newFn func() *T
-}
-
-// objectPoolMax caps how many objects one pool retains.
-const objectPoolMax = 4096
-
-func newObjectPool[T any](newFn func() *T) *objectPool[T] {
-	return &objectPool[T]{newFn: newFn}
-}
-
-func (p *objectPool[T]) get() *T {
-	p.mu.Lock()
-	n := len(p.buf)
-	if n == 0 {
-		p.mu.Unlock()
-		return p.newFn()
-	}
-	o := p.buf[n-1]
-	p.buf[n-1] = nil // do not keep a ghost reference in the backing array
-	p.buf = p.buf[:n-1]
-	p.mu.Unlock()
-	return o
-}
-
-func (p *objectPool[T]) put(o *T) {
-	p.mu.Lock()
-	if len(p.buf) < objectPoolMax {
-		p.buf = append(p.buf, o)
-	}
-	p.mu.Unlock()
-}
+func PutStreamFrames(streamFrames []StreamFrame) { streamFramesPool.Put(streamFrames[:0]) }

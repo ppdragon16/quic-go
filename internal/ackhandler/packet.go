@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/daeuniverse/quic-go/internal/protocol"
+	"github.com/daeuniverse/quic-go/internal/utils"
 )
 
 // A Packet is a packet
@@ -32,10 +33,13 @@ func (p *packet) outstanding() bool {
 	return !p.declaredLost && !p.skippedPacket && !p.IsPathMTUProbePacket
 }
 
-var packetPool = newObjectPool(func() *packet { return &packet{} })
+var packetPool = utils.NewPool(func() *packet { return &packet{} }, packetPoolMax)
+
+// packetPoolMax bounds how many packets the pool retains (~120B each).
+const packetPoolMax = 4096
 
 func getPacket() *packet {
-	p := packetPool.get()
+	p := packetPool.Get()
 	*p = packet{}
 	return p
 }
@@ -45,5 +49,5 @@ func putPacket(p *packet) {
 	PutStreamFrames(p.StreamFrames)
 	p.Frames = nil
 	p.StreamFrames = nil
-	packetPool.put(p)
+	packetPool.Put(p)
 }
