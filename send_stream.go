@@ -306,12 +306,18 @@ func (s *sendStream) popNewOrRetransmittedStreamFrame(maxBytes protocol.ByteCoun
 	if len(s.dataForWriting) == 0 && s.nextFrame == nil {
 		if s.finishedWriting && !s.finSent {
 			s.finSent = true
-			return &wire.StreamFrame{
-				StreamID:       s.streamID,
-				Offset:         s.writeOffset,
-				DataLenPresent: true,
-				Fin:            true,
-			}, nil, false
+			// FIN-only frame: take it from the stream frame pool like every
+			// other send-side STREAM frame. A fresh literal here was the only
+			// production path bypassing the pool — one heap allocation per
+			// stream close — yet it is handed back via PutBack on ack anyway,
+			// so it also entered the pool without ever having been taken from
+			// it.
+			f := wire.GetStreamFrame()
+			f.StreamID = s.streamID
+			f.Offset = s.writeOffset
+			f.DataLenPresent = true
+			f.Fin = true
+			return f, nil, false
 		}
 		return nil, nil, false
 	}
