@@ -299,3 +299,18 @@ func TestReceiveQueueStorageBoundedWithoutFullDrain(t *testing.T) {
 		t.Fatal("queue must be empty after drain")
 	}
 }
+
+// TestDatagramSendQueueFullTimeoutDefault pins the default bound on a stalled
+// datagram send queue.
+//
+// A peer that stops ACKing leaves this queue undrained for as long as the
+// retransmission timeout keeps backing off (congestion-limited packing never
+// pops a datagram), so this timeout is both how fast a black-holed path is
+// detected and how long the writing goroutine blocks. It has to stay well below
+// the 30s idle timeout and above a transient congestion burst; raising it back
+// to a "safer" value silently restores a multi-second hang per stalled write.
+func TestDatagramSendQueueFullTimeoutDefault(t *testing.T) {
+	if datagramSendQueueFullTimeout != 5*time.Second {
+		t.Fatalf("datagramSendQueueFullTimeout = %v, want 5s", datagramSendQueueFullTimeout)
+	}
+}

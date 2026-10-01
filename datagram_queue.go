@@ -43,13 +43,16 @@ const (
 // The timer measures the length of a *zero-drain* stall: every datagram that
 // is dequeued (h.sent) resets it, so slow-but-steady backpressure never trips
 // it — only a queue that stays full with nothing sent for the whole interval
-// does. 15s is far above a transient congestion burst (cwnd collapse + recovery
-// is RTT-scale, sub-second to a few seconds) and below the default QUIC idle
-// timeout (30s, see hy2 defaultMaxIdleTimeout). The idle timeout is receive-side
-// and is masked by KeepAlivePeriod PING/ACKs while the peer is reachable, so a
-// send-side stall (datagrams can't drain) would otherwise never time out; this
-// is the only bound on such a stall.
-var datagramSendQueueFullTimeout = 15 * time.Second
+// does. Note that congestion-limited packing never drains this queue at all:
+// SendAck packs an ACK-only packet, and composeNextPacket returns before the
+// DATAGRAM handling, so a peer that stops ACKing leaves a full queue undrained
+// while the retransmission timeout backs off (each PTO doubles the interval).
+// The timeout is therefore both the bound on a black-holed path and the bound
+// on how long the writing goroutine blocks; 5s stays above a transient
+// congestion burst (cwnd collapse and recovery are RTT-scale) and well below
+// the 30s idle timeout (see hy2 defaultMaxIdleTimeout), which is receive-side
+// and masked by keep-alives while the peer is reachable.
+var datagramSendQueueFullTimeout = 5 * time.Second
 
 // ErrDatagramQueueFullTimeout is returned by Add when the send queue stayed
 // full for datagramSendQueueFullTimeout. The datagram was dropped and the
