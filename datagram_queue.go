@@ -240,6 +240,14 @@ func (h *datagramQueue) Peek() *wire.DatagramFrame {
 	return h.sendQueue.PeekFront()
 }
 
+// Pending reports how many DATAGRAM frames are waiting to be packed. It is read
+// by the connection's send-path watchdog, which runs on its own goroutine.
+func (h *datagramQueue) Pending() int {
+	h.sendMx.Lock()
+	defer h.sendMx.Unlock()
+	return h.sendQueue.Len()
+}
+
 func (h *datagramQueue) Pop() {
 	h.sendMx.Lock()
 	defer h.sendMx.Unlock()

@@ -519,6 +519,75 @@ func (s *connection) abortAfterStartupFailure(startupErr error) error {
 	return startupErr
 }
 
+// Send-path watchdog tuning. A stalled send path is invisible from the outside:
+// the connection stays alive (keep-alives keep the idle timer happy) while every
+// stream and DATAGRAM write times out, which is indistinguishable from a quiet
+// link without a report like this one.
+const (
+	sendPathWatchdogInterval   = 500 * time.Millisecond
+	sendPathStallThreshold     = 2 * time.Second
+	sendPathSlowWriteThreshold = 500 * time.Millisecond
+)
+
+// sendPathWatchdog reports a send path that stopped making progress while
+// packets or DATAGRAM frames are still queued. It distinguishes the two ways a
+// transport can stall: a socket write that blocks (writeBlockedFor > 0, i.e. the
+// kernel send buffer or the device queue is not draining) from the connection
+// no longer packing at all (writes idle). One line per stall: the last reported
+// activity timestamp gates further reports until the send path moves again.
+func (s *connection) sendPathWatchdog() {
+	ticker := time.NewTicker(sendPathWatchdogInterval)
+	defer ticker.Stop()
+	var reportedActivity int64
+	for {
+		var now time.Time
+		select {
+		case <-s.ctx.Done():
+			return
+		case now = <-ticker.C:
+		}
+		sq, ok := s.sendQueue.(*sendQueue)
+		if !ok {
+			return
+		}
+		last := sq.LastActivity()
+		if last.IsZero() || last.UnixNano() == reportedActivity {
+			continue
+		}
+		pendingDatagrams := 0
+		if s.datagramQueue != nil {
+			pendingDatagrams = s.datagramQueue.Pending()
+		}
+		msg, stalled := sendPathStallReport(
+			sq.Pending(), pendingDatagrams,
+			now.Sub(last), sq.WriteBlockedFor(now),
+		)
+		if !stalled {
+			continue
+		}
+		reportedActivity = last.UnixNano()
+		s.logger.Errorf("%s (connection %s)", msg, s.logID)
+	}
+}
+
+// sendPathStallReport decides whether a send path is stalled enough to report
+// and formats the line. It is separate from the watchdog so the decision is
+// testable without a live connection.
+func sendPathStallReport(pendingPackets, pendingDatagrams int, stalledFor, writeBlockedFor time.Duration) (string, bool) {
+	if pendingPackets == 0 && pendingDatagrams == 0 {
+		// Nothing to send: a quiet connection is not a stalled one.
+		return "", false
+	}
+	if stalledFor < sendPathStallThreshold && writeBlockedFor < sendPathSlowWriteThreshold {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"Send path stalled for %s: %d packet(s) queued, %d datagram(s) queued, socket write blocked for %s",
+		stalledFor.Round(time.Millisecond), pendingPackets, pendingDatagrams,
+		writeBlockedFor.Round(time.Millisecond),
+	), true
+}
+
 // run the connection main loop
 func (s *connection) run() error {
 	var closeErr closeError
@@ -541,6 +610,7 @@ func (s *connection) run() error {
 	}()
 
 	s.timer = *newTimer()
+	go s.sendPathWatchdog()
 
 	if err := s.cryptoStreamHandler.StartHandshake(s.ctx); err != nil {
 		return s.abortAfterStartupFailure(err)
