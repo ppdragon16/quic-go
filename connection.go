@@ -1642,16 +1642,27 @@ func (s *connection) destroy(e error) {
 
 func (s *connection) destroyImpl(e error) {
 	s.closeOnce.Do(func() {
-		if nerr, ok := e.(net.Error); ok && nerr.Timeout() {
+		switch {
+		case e == nil:
+			// destroy(nil) is the dial-cancellation path (DialAddr's ctx
+			// deadline): the dial never completed, so there is nothing to
+			// report here -- the caller already logs why it gave up, and one
+			// abandoned dial per racing address would only bury it.
+		case isTimeoutError(e):
 			s.logger.Errorf("Destroying connection: %s", e)
-		} else if errors.Is(e, ErrTransportClosed) {
+		case errors.Is(e, ErrTransportClosed):
 			// Transport closing is normal cleanup, not an error condition.
 			s.logger.Infof("Destroying connection as transport closed")
-		} else {
+		default:
 			s.logger.Errorf("Destroying connection with error: %s", e)
 		}
 		s.closeChan <- closeError{err: e, immediate: true, remote: false}
 	})
+}
+
+func isTimeoutError(e error) bool {
+	nerr, ok := e.(net.Error)
+	return ok && nerr.Timeout()
 }
 
 func (s *connection) closeRemote(e error) {
